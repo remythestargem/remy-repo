@@ -1,0 +1,45 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Create Capacitor Android project
+        run: |
+          mkdir apk-build
+          cd apk-build
+          npm init -y
+          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npx cap init IslandAdventure com.remythestargem.islandadventure --web-dir ../my-game
+          npx cap add android
+          npx cap sync android
+
+      - name: Build debug APK
+        run: |
+          cd apk-build/android
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: island-adventure-debug-apk
+          path: apk-build/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          

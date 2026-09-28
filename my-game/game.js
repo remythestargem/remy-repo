@@ -70,12 +70,12 @@ edge.rotation.x = -Math.PI / 2;
 edge.position.y = 0.08;
 scene.add(edge);
 
-// The playable terrain is an optimized local copy of Poly Haven's Coast Line 02
-// photogrammetry scan. The original licensed CC0 source and exact file hashes are
-// recorded in assets/polyhaven/ATTRIBUTION.md. No primitive island is used here.
+// The playable terrain is Poly Haven's original Coast Line 02 photogrammetry scan.
+// It is loaded directly from Poly Haven's CC0 source package — not replaced by
+// generated terrain or primitive geometry. Props are grounded from real bounds.
 const loader = new GLTFLoader();
-// Poly Haven hosts the original CC0 source packages. We load these original glTFs
-// directly rather than substitute primitive geometry; all placements use real bounds.
+// Poly Haven hosts the original CC0 source packages. Direct loading avoids shipping
+// an altered substitute model while keeping the source and license unambiguous.
 const POLY_HAVEN = "https://dl.polyhaven.org/file/ph-assets/Models";
 const world = new THREE.Group();
 world.name = "Poly Haven Coast Line 02 — CC0 photogrammetry";

@@ -93,28 +93,9 @@ loader.load(
   () => { makeFallbackIsland(); hint.textContent = "Island fallback loaded · drag to look"; }
 );
 
-// High-detail CC0 photogrammetry scans from Poly Haven, intentionally 1K-texture variants for mobile.
-const polyHavenAssets = [
-  {
-    url: "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/rock_moss_set_01/rock_moss_set_01_1k.gltf",
-    positions: [[-21, 0, -16, 0.2], [21, 0, -14, -0.9], [-22, 0, 14, 1.1], [19, 0, 17, 2.0]]
-  },
-  {
-    url: "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/rock_face_01/rock_face_01_1k.gltf",
-    positions: [[-25, 0, 1, 0.5], [24, 0, 4, -1.1], [-6, 0, -25, 1.8], [7, 0, 24, -2.0]]
-  }
-];
-for (const asset of polyHavenAssets) {
-  loader.load(asset.url, (gltf) => {
-    gltf.scene.traverse((node) => { if (node.isMesh) { node.castShadow = true; node.receiveShadow = true; } });
-    for (const [x, y, z, rotation] of asset.positions) {
-      const prop = gltf.scene.clone(true);
-      prop.position.set(x, y, z);
-      prop.rotation.y = rotation;
-      scene.add(prop);
-    }
-  }, undefined, () => console.warn("Poly Haven scenery could not be loaded."));
-}
+// Poly Haven scans are held back until they are baked to this world’s terrain.
+// Streaming an entire scan set as a prop caused geometry to hover over the path.
+// The existing authored world remains the source of truth for terrain collision and scale.
 
 const move = { x: 0, y: 0 };
 const pad = document.querySelector("#joystick");

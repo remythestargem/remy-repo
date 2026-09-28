@@ -2,10 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>My Game</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#071b2a" />
+  <title>Island Adventure</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <!-- Main environment: assets/world/world.gltf -->
+  <main id="game" aria-label="Island Adventure world viewer">
+    <canvas id="game-canvas"></canvas>
+    <section id="hud"><h1>Island Adventure</h1><p id="hint">Drag to look · Move with joystick</p></section>
+    <section id="touch-controls" aria-label="Mobile controls">
+      <div id="joystick" class="control-pad" aria-label="Move"><div id="stick"></div></div>
+      <div class="action-buttons"><button id="up" aria-label="Move camera up">▲</button><button id="down" aria-label="Move camera down">▼</button></div>
+    </section>
+  </main>
+  <script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
+  <script type="module" src="game.js"></script>
 </body>
 </html>

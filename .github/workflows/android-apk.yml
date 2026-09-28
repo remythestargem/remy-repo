@@ -1,6 +1,6 @@
 name: Build Android APK
 
-"on":
+on:
   push:
     branches:
       - main
@@ -32,8 +32,13 @@ jobs:
           cd apk-build
           npm init -y
           npm install @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
-          printf '%s
-' '{"appId":"com.remythestargem.islandadventure","appName":"Island Adventure","webDir":"www"}' > capacitor.config.json
+          cat << 'EOF' > capacitor.config.json
+          {
+            "appId": "com.remythestargem.islandadventure",
+            "appName": "Island Adventure",
+            "webDir": "www"
+          }
+          EOF
           CI=true npx cap add android
           npx cap sync android
 

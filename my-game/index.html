@@ -8,12 +8,12 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <main id="game" aria-label="Island Adventure world viewer">
+  <main id="game" aria-label="Island Adventure third-person game">
     <canvas id="game-canvas"></canvas>
-    <section id="hud"><h1>Island Adventure</h1><p id="hint">Drag to look · Move with joystick</p></section>
+    <section id="hud"><h1>Island Adventure</h1><p id="hint">Move with the joystick · drag anywhere else to look</p></section>
     <section id="touch-controls" aria-label="Mobile controls">
-      <div id="joystick" class="control-pad" aria-label="Move"><div id="stick"></div></div>
-      <div class="action-buttons"><button id="up" aria-label="Move camera up">▲</button><button id="down" aria-label="Move camera down">▼</button></div>
+      <div id="joystick" class="control-pad" aria-label="Move player"><div id="stick"></div></div>
+      <div class="look-note" aria-hidden="true">DRAG<br>TO LOOK</div>
     </section>
   </main>
   <script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>

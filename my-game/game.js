@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 const canvas = document.querySelector("#game-canvas");
 const hint = document.querySelector("#hint");
@@ -15,18 +14,7 @@ renderer.toneMappingExposure = 1.12;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x78bad5);
 scene.fog = new THREE.FogExp2(0x78bad5, 0.016);
-const camera = new THREE.PerspectiveCamera(53, 9 / 16, 0.1, 220);
-camera.position.set(10, 8, 12);
-
-const controls = new OrbitControls(camera, canvas);
-controls.enableDamping = true;
-controls.dampingFactor = 0.09;
-controls.enablePan = false;
-controls.minDistance = 5.3;
-controls.maxDistance = 16;
-controls.minPolarAngle = 0.56;
-controls.maxPolarAngle = 1.3;
-controls.target.set(0, 1.1, 0);
+const camera = new THREE.PerspectiveCamera(54, 9 / 16, 0.1, 220);
 
 scene.add(new THREE.HemisphereLight(0xdff5ff, 0x263719, 2.4));
 const sun = new THREE.DirectionalLight(0xffedc4, 3.3);
@@ -73,21 +61,14 @@ shadow.rotation.x = -Math.PI / 2;
 shadow.position.y = 0.028;
 scene.add(shadow);
 
-// Visible edge and hard movement limit keep the player and camera inside the island.
 const WORLD_RADIUS = 29;
 const edge = new THREE.Mesh(
-  new THREE.RingGeometry(WORLD_RADIUS - 0.14, WORLD_RADIUS + 0.14, 160),
-  new THREE.MeshBasicMaterial({ color: 0xffdda1, transparent: true, opacity: 0.46, side: THREE.DoubleSide })
+  new THREE.RingGeometry(WORLD_RADIUS - 0.1, WORLD_RADIUS + 0.1, 160),
+  new THREE.MeshBasicMaterial({ color: 0xffdda1, transparent: true, opacity: 0.28, side: THREE.DoubleSide })
 );
 edge.rotation.x = -Math.PI / 2;
 edge.position.y = 0.08;
 scene.add(edge);
-for (let i = 0; i < 18; i++) {
-  const a = i / 18 * Math.PI * 2;
-  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.1, 0.48, 8), new THREE.MeshStandardMaterial({ color: 0xefd18d, emissive: 0x6b3d12, emissiveIntensity: 0.32 }));
-  post.position.set(Math.cos(a) * WORLD_RADIUS, 0.3, Math.sin(a) * WORLD_RADIUS);
-  post.castShadow = true; scene.add(post);
-}
 
 function makeFallbackIsland() {
   const island = new THREE.Group();
@@ -100,64 +81,142 @@ function makeFallbackIsland() {
   scene.add(island);
 }
 
-new GLTFLoader().load(
+const loader = new GLTFLoader();
+loader.load(
   "assets/world/world.gltf",
   (gltf) => {
     gltf.scene.traverse((node) => { if (node.isMesh) { node.castShadow = true; node.receiveShadow = true; } });
     scene.add(gltf.scene);
-    hint.textContent = "Explore the island · stay inside the gold boundary";
+    hint.textContent = "Move with the joystick · drag anywhere else to look";
   },
   undefined,
-  () => { makeFallbackIsland(); hint.textContent = "Island fallback loaded · stay inside the gold boundary"; }
+  () => { makeFallbackIsland(); hint.textContent = "Island fallback loaded · drag to look"; }
 );
 
-const move = { x: 0, y: 0, up: false, down: false };
+// High-detail CC0 photogrammetry scans from Poly Haven, intentionally 1K-texture variants for mobile.
+const polyHavenAssets = [
+  {
+    url: "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/rock_moss_set_01/rock_moss_set_01_1k.gltf",
+    positions: [[-21, 0, -16, 0.2], [21, 0, -14, -0.9], [-22, 0, 14, 1.1], [19, 0, 17, 2.0]]
+  },
+  {
+    url: "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/rock_face_01/rock_face_01_1k.gltf",
+    positions: [[-25, 0, 1, 0.5], [24, 0, 4, -1.1], [-6, 0, -25, 1.8], [7, 0, 24, -2.0]]
+  }
+];
+for (const asset of polyHavenAssets) {
+  loader.load(asset.url, (gltf) => {
+    gltf.scene.traverse((node) => { if (node.isMesh) { node.castShadow = true; node.receiveShadow = true; } });
+    for (const [x, y, z, rotation] of asset.positions) {
+      const prop = gltf.scene.clone(true);
+      prop.position.set(x, y, z);
+      prop.rotation.y = rotation;
+      scene.add(prop);
+    }
+  }, undefined, () => console.warn("Poly Haven scenery could not be loaded."));
+}
+
+const move = { x: 0, y: 0 };
 const pad = document.querySelector("#joystick");
 const stick = document.querySelector("#stick");
-let activePointer = null;
+let stickPointer = null;
 function setStick(event) {
   const rect = pad.getBoundingClientRect();
-  const dx = event.clientX - rect.left - rect.width / 2, dy = event.clientY - rect.top - rect.height / 2, max = 37;
+  const dx = event.clientX - rect.left - rect.width / 2;
+  const dy = event.clientY - rect.top - rect.height / 2;
+  const max = Math.min(rect.width, rect.height) * 0.31;
   const scale = Math.min(1, max / (Math.hypot(dx, dy) || 1));
-  move.x = dx / max * scale; move.y = dy / max * scale;
+  move.x = dx / max * scale;
+  move.y = dy / max * scale;
   stick.style.transform = `translate(${move.x * max}px, ${move.y * max}px)`;
 }
-pad.addEventListener("pointerdown", (event) => { activePointer = event.pointerId; pad.setPointerCapture(activePointer); setStick(event); });
-pad.addEventListener("pointermove", (event) => { if (event.pointerId === activePointer) setStick(event); });
-for (const type of ["pointerup", "pointercancel"]) pad.addEventListener(type, (event) => { if (event.pointerId === activePointer) { activePointer = null; move.x = move.y = 0; stick.style.transform = ""; } });
-for (const [id, key] of [["up", "up"], ["down", "down"]]) {
-  const button = document.querySelector(`#${id}`);
-  button.addEventListener("pointerdown", (event) => { move[key] = true; button.setPointerCapture(event.pointerId); });
-  for (const type of ["pointerup", "pointercancel"]) button.addEventListener(type, () => move[key] = false);
-}
-addEventListener("keydown", (event) => {
-  if (["KeyW", "ArrowUp"].includes(event.code)) move.y = -1;
-  if (["KeyS", "ArrowDown"].includes(event.code)) move.y = 1;
-  if (["KeyA", "ArrowLeft"].includes(event.code)) move.x = -1;
-  if (["KeyD", "ArrowRight"].includes(event.code)) move.x = 1;
-  if (event.code === "KeyQ") move.up = true; if (event.code === "KeyE") move.down = true;
-});
-addEventListener("keyup", (event) => {
-  if (["KeyW", "ArrowUp", "KeyS", "ArrowDown"].includes(event.code)) move.y = 0;
-  if (["KeyA", "ArrowLeft", "KeyD", "ArrowRight"].includes(event.code)) move.x = 0;
-  if (event.code === "KeyQ") move.up = false; if (event.code === "KeyE") move.down = false;
+pad.addEventListener("pointerdown", (event) => { stickPointer = event.pointerId; pad.setPointerCapture(event.pointerId); setStick(event); });
+pad.addEventListener("pointermove", (event) => { if (event.pointerId === stickPointer) setStick(event); });
+for (const type of ["pointerup", "pointercancel"]) pad.addEventListener(type, (event) => {
+  if (event.pointerId === stickPointer) { stickPointer = null; move.x = move.y = 0; stick.style.transform = ""; }
 });
 
-const forward = new THREE.Vector3(), right = new THREE.Vector3(), input = new THREE.Vector3(), previous = new THREE.Vector3();
+// Touch-drag rotates a third-person camera. Zoom gestures and mouse wheel are deliberately disabled.
+let lookPointer = null;
+let lastLookX = 0;
+let lastLookY = 0;
+let cameraYaw = 0.72;
+let cameraPitch = 0.52;
+const LOOK_SENSITIVITY = 0.0062;
+canvas.addEventListener("pointerdown", (event) => {
+  if (lookPointer !== null) return;
+  lookPointer = event.pointerId;
+  lastLookX = event.clientX; lastLookY = event.clientY;
+  canvas.setPointerCapture(event.pointerId);
+});
+canvas.addEventListener("pointermove", (event) => {
+  if (event.pointerId !== lookPointer) return;
+  cameraYaw -= (event.clientX - lastLookX) * LOOK_SENSITIVITY;
+  cameraPitch = THREE.MathUtils.clamp(cameraPitch - (event.clientY - lastLookY) * LOOK_SENSITIVITY, 0.25, 1.02);
+  lastLookX = event.clientX; lastLookY = event.clientY;
+});
+for (const type of ["pointerup", "pointercancel"]) canvas.addEventListener(type, (event) => {
+  if (event.pointerId === lookPointer) lookPointer = null;
+});
+canvas.addEventListener("wheel", (event) => event.preventDefault(), { passive: false });
+canvas.addEventListener("gesturestart", (event) => event.preventDefault());
+
+const keys = {};
+addEventListener("keydown", (event) => { keys[event.code] = true; });
+addEventListener("keyup", (event) => { keys[event.code] = false; });
+
+const forward = new THREE.Vector3();
+const right = new THREE.Vector3();
+const input = new THREE.Vector3();
+const followTarget = new THREE.Vector3(0, 1.2, 0);
+const desiredCamera = new THREE.Vector3();
+const CAMERA_DISTANCE = 8.2;
 let last = performance.now();
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now; previous.copy(player.position);
-  camera.getWorldDirection(forward); forward.y = 0; forward.normalize(); right.crossVectors(forward, camera.up).normalize();
-  input.set(0, 0, 0).addScaledVector(forward, -move.y).addScaledVector(right, move.x);
-  if (input.lengthSq() > 0.001) { input.normalize(); player.position.addScaledVector(input, 8.2 * dt); player.rotation.y = Math.atan2(input.x, input.z); }
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  const keyX = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+  const keyY = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0);
+  const controlX = Math.abs(move.x) > 0.01 ? move.x : keyX;
+  const controlY = Math.abs(move.y) > 0.01 ? move.y : keyY;
+
+  forward.set(-Math.sin(cameraYaw), 0, -Math.cos(cameraYaw));
+  right.set(Math.cos(cameraYaw), 0, -Math.sin(cameraYaw));
+  input.set(0, 0, 0).addScaledVector(forward, -controlY).addScaledVector(right, controlX);
+  const walking = input.lengthSq() > 0.001;
+  if (walking) {
+    input.normalize();
+    player.position.addScaledVector(input, 8.2 * dt);
+    player.rotation.y = Math.atan2(input.x, input.z);
+  }
   const distance = Math.hypot(player.position.x, player.position.z);
-  if (distance > WORLD_RADIUS - 1.1) { const scale = (WORLD_RADIUS - 1.1) / distance; player.position.x *= scale; player.position.z *= scale; }
-  player.position.y = Math.min(8, Math.max(0, player.position.y + ((move.up ? 5 : 0) - (move.down ? 5 : 0)) * dt));
-  camera.position.add(player.position.clone().sub(previous));
-  controls.target.copy(player.position).add(new THREE.Vector3(0, 1.05, 0));
+  if (distance > WORLD_RADIUS - 1.1) {
+    const scale = (WORLD_RADIUS - 1.1) / distance;
+    player.position.x *= scale; player.position.z *= scale;
+  }
+  const bob = walking ? Math.sin(now * 0.016) * 0.055 : 0;
+  player.position.y = THREE.MathUtils.lerp(player.position.y, bob, Math.min(1, dt * 12));
   shadow.position.set(player.position.x, 0.028, player.position.z);
-  shadow.scale.setScalar(1 - Math.min(player.position.y / 18, 0.55));
-  controls.update(); renderer.render(scene, camera); requestAnimationFrame(frame);
+
+  followTarget.lerp(new THREE.Vector3(player.position.x, player.position.y + 1.15, player.position.z), 1 - Math.exp(-dt * 11));
+  const flatDistance = Math.cos(cameraPitch) * CAMERA_DISTANCE;
+  desiredCamera.set(
+    followTarget.x + Math.sin(cameraYaw) * flatDistance,
+    followTarget.y + Math.sin(cameraPitch) * CAMERA_DISTANCE + (walking ? Math.sin(now * 0.012) * 0.045 : 0),
+    followTarget.z + Math.cos(cameraYaw) * flatDistance
+  );
+  camera.position.lerp(desiredCamera, 1 - Math.exp(-dt * 9));
+  camera.lookAt(followTarget);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
 }
-function resize() { const width = canvas.clientWidth || innerWidth, height = canvas.clientHeight || innerHeight; renderer.setSize(width, height, false); camera.aspect = width / height; camera.updateProjectionMatrix(); }
-addEventListener("resize", resize); resize(); requestAnimationFrame(frame);
+function resize() {
+  const width = canvas.clientWidth || innerWidth;
+  const height = canvas.clientHeight || innerHeight;
+  renderer.setSize(width, height, false);
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize);
+resize();
+requestAnimationFrame(frame);

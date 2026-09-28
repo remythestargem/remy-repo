@@ -32,8 +32,9 @@ jobs:
           cd apk-build
           npm init -y
           npm install @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
-          printf '%s\n' '{"appId":"com.remythestargem.islandadventure","appName":"Island Adventure","webDir":"www"}' > capacitor.config.json
-          npx cap add android --no-interactive
+          printf '%s
+' '{"appId":"com.remythestargem.islandadventure","appName":"Island Adventure","webDir":"www"}' > capacitor.config.json
+          CI=true npx cap add android
           npx cap sync android
 
       - name: Build debug APK
@@ -45,4 +46,3 @@ jobs:
           name: island-adventure-debug-apk
           path: apk-build/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-          

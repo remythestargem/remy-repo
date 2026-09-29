@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#071b2a" />
   <title>Island Adventure</title>
   <link rel="stylesheet" href="style.css" />
@@ -10,16 +10,27 @@
 <body>
   <main id="game" aria-label="Island Adventure third-person game">
     <canvas id="game-canvas"></canvas>
-    <section id="hud"><h1>Island Adventure</h1><p id="hint">Move with the joystick · drag anywhere else to look</p></section>
-    <section id="touch-controls" aria-label="Mobile controls">
-      <div id="joystick" class="control-pad" aria-label="Move player"><div id="stick"></div></div>
-      <div class="look-note" aria-hidden="true">DRAG<br>TO LOOK</div>
-    </section>
+    
+    <header id="hud">
+      <h1>Island Adventure</h1>
+      <p id="hint">Move player with the left joystick · Look with the right side</p>
+    </header>
+
+    <div id="controls-layer">
+      <!-- Left zone: Analog joystick for character movement -->
+      <div id="joystick-zone">
+        <div id="joystick-base">
+          <div id="joystick-knob"></div>
+        </div>
+      </div>
+
+      <!-- Right zone: Touch-look area and Jump action -->
+      <div id="action-zone">
+        <button id="jump-btn" type="button" aria-label="Jump">JUMP</button>
+      </div>
+    </div>
   </main>
-  <aside id="rotate-device" role="alert" aria-live="polite">
-    <div class="rotate-icon" aria-hidden="true"></div>
-    <strong>Rotate your phone</strong><span>Island Adventure is played in landscape.</span>
-  </aside>
+
   <script type="importmap">{"imports":{"three":"./libs/three.module.js","three/addons/":"./libs/"}}</script>
   <script type="module" src="game.js"></script>
 </body>

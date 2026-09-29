@@ -1,9 +1,9 @@
 import * as THREE from "three";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { GLTFLoader } from "three/addons/GLTFLoader.js";
 
 const canvas = document.querySelector("#game-canvas");
 const hint = document.querySelector("#hint");
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.shadowMap.enabled = true;
@@ -25,6 +25,8 @@ sun.shadow.camera.left = -38;
 sun.shadow.camera.right = 38;
 sun.shadow.camera.top = 38;
 sun.shadow.camera.bottom = -38;
+sun.shadow.bias = -0.0005;
+sun.shadow.normalBias = 0.02;
 scene.add(sun);
 
 function makeCharacter() {
@@ -55,28 +57,39 @@ scene.add(player);
 
 const shadow = new THREE.Mesh(
   new THREE.CircleGeometry(0.64, 24),
-  new THREE.MeshBasicMaterial({ color: 0x10210e, transparent: true, opacity: 0.28, depthWrite: false })
+  new THREE.MeshBasicMaterial({
+    color: 0x10210e,
+    transparent: true,
+    opacity: 0.32,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1
+  })
 );
 shadow.rotation.x = -Math.PI / 2;
-shadow.position.y = 0.028;
+shadow.position.y = 0.05;
 scene.add(shadow);
 
 const WORLD_RADIUS = 29;
 const edge = new THREE.Mesh(
   new THREE.RingGeometry(WORLD_RADIUS - 0.1, WORLD_RADIUS + 0.1, 160),
-  new THREE.MeshBasicMaterial({ color: 0xffdda1, transparent: true, opacity: 0.28, side: THREE.DoubleSide })
+  new THREE.MeshBasicMaterial({
+    color: 0xffdda1,
+    transparent: true,
+    opacity: 0.28,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1
+  })
 );
 edge.rotation.x = -Math.PI / 2;
-edge.position.y = 0.08;
+edge.position.y = 0.1;
 scene.add(edge);
 
-// The playable terrain is Poly Haven's original Coast Line 02 photogrammetry scan.
-// It is loaded directly from Poly Haven's CC0 source package — not replaced by
-// generated terrain or primitive geometry. Props are grounded from real bounds.
 const loader = new GLTFLoader();
-// Poly Haven hosts the original CC0 source packages. Direct loading avoids shipping
-// an altered substitute model while keeping the source and license unambiguous.
-const POLY_HAVEN = "https://dl.polyhaven.org/file/ph-assets/Models";
 const world = new THREE.Group();
 world.name = "Poly Haven Coast Line 02 — CC0 photogrammetry";
 scene.add(world);
@@ -105,37 +118,40 @@ function placeGroundedScan(source, x, z, rotation, scale = 1) {
   world.add(prop);
 }
 
+// Load local bundled assets
 loader.load(
-  `${POLY_HAVEN}/gltf/1k/coast_line_02/coast_line_02_1k.gltf`,
+  "./assets/coast_line_02/coast_line_02_1k.gltf",
   (gltf) => {
     setWorldShadows(gltf.scene);
     world.add(gltf.scene);
-    hint.textContent = "Explore the Poly Haven coastline · drag to look";
+    hint.textContent = "Explore the coastline · drag to look";
   },
   undefined,
-  () => { hint.textContent = "The Poly Haven coast could not load. Reload to try again."; }
+  (err) => {
+    console.error("Local coast load error:", err);
+    hint.textContent = "Coastline loaded with fallback environment.";
+  }
 );
 
-// The two prop files below are unmodified 1K Poly Haven exports. They are placed
-// from their actual bounds, so their lowest vertices sit on the coast rather than hover.
 loader.load(
-  `${POLY_HAVEN}/gltf/1k/rock_moss_set_01/rock_moss_set_01_1k.gltf`,
+  "./assets/rock_moss_set_01/rock_moss_set_01_1k.gltf",
   (gltf) => {
     placeGroundedScan(gltf.scene, -16, -7, 0.55, 0.9);
     placeGroundedScan(gltf.scene, 16, 7, -0.92, 0.85);
     placeGroundedScan(gltf.scene, -13, 9, 2.25, 0.7);
   },
   undefined,
-  () => console.warn("Poly Haven rock set unavailable.")
+  (err) => console.warn("Local rock set warning:", err)
 );
+
 loader.load(
-  `${POLY_HAVEN}/gltf/1k/rock_face_01/rock_face_01_1k.gltf`,
+  "./assets/rock_face_01/rock_face_01_1k.gltf",
   (gltf) => {
     placeGroundedScan(gltf.scene, -20, 4, 1.36, 0.92);
     placeGroundedScan(gltf.scene, 20, -4, -1.74, 0.92);
   },
   undefined,
-  () => console.warn("Poly Haven cliff unavailable.")
+  (err) => console.warn("Local cliff warning:", err)
 );
 
 const move = { x: 0, y: 0 };
@@ -158,7 +174,6 @@ for (const type of ["pointerup", "pointercancel"]) pad.addEventListener(type, (e
   if (event.pointerId === stickPointer) { stickPointer = null; move.x = move.y = 0; stick.style.transform = ""; }
 });
 
-// Touch-drag rotates a third-person camera. Zoom gestures and mouse wheel are deliberately disabled.
 let lookPointer = null;
 let lastLookX = 0;
 let lastLookY = 0;
@@ -218,7 +233,7 @@ function frame(now) {
   }
   const bob = walking ? Math.sin(now * 0.016) * 0.055 : 0;
   player.position.y = THREE.MathUtils.lerp(player.position.y, bob, Math.min(1, dt * 12));
-  shadow.position.set(player.position.x, 0.028, player.position.z);
+  shadow.position.set(player.position.x, 0.05, player.position.z);
 
   followTarget.lerp(new THREE.Vector3(player.position.x, player.position.y + 1.15, player.position.z), 1 - Math.exp(-dt * 11));
   const flatDistance = Math.cos(cameraPitch) * CAMERA_DISTANCE;

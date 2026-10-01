@@ -254,14 +254,28 @@ function tryLoadTrack(index = 0) {
             const wBox = new THREE.Box3().copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
             child.userData.worldBox = wBox;
           }
-          if (child.material) {
-            if (Array.isArray(child.material)) {
-              child.material.forEach((m) => { m.precision = 'mediump'; });
-            } else {
-              child.material.precision = 'mediump';
+
+          const mat = child.material;
+          const mats = Array.isArray(mat) ? mat : [mat];
+          let isFoliageOrObstacle = false;
+
+          mats.forEach((m) => {
+            if (!m) return;
+            m.precision = 'mediump';
+            const matName = (m.name || '').toLowerCase();
+            // Optimize foliage & transparent surfaces for mobile GPU
+            if (matName.includes('tree') || matName.includes('leaf') || matName.includes('veg') || matName.includes('fence') || matName.includes('alpha')) {
+              isFoliageOrObstacle = true;
+              m.transparent = false;
+              m.alphaTest = 0.5;
+              m.depthWrite = true;
             }
+          });
+
+          // Only road, terrain, grass, curbs, and asphalt should be ground colliders
+          if (!isFoliageOrObstacle) {
+            trackColliders.push(child);
           }
-          trackColliders.push(child);
         }
       });
       scene.add(trackModel);
@@ -540,11 +554,16 @@ function animate(now) {
     carGroup.position.copy(state.car.position);
     carGroup.rotation.y = state.car.heading;
 
-    // Pitch/roll alignment with hill terrain
-    if (groundHit && groundHit.face) {
+    // Pitch/roll alignment with hill terrain (stabilized: prevent flipping)
+    if (groundHit && groundHit.face && groundHit.face.normal.y > 0.65) {
       const normal = groundHit.face.normal;
-      carGroup.rotation.x = THREE.MathUtils.lerp(carGroup.rotation.x, -normal.z * 0.8, 0.1);
-      carGroup.rotation.z = THREE.MathUtils.lerp(carGroup.rotation.z, normal.x * 0.8, 0.1);
+      const targetPitch = Math.max(-0.25, Math.min(0.25, -normal.z * 0.6));
+      const targetRoll = Math.max(-0.25, Math.min(0.25, normal.x * 0.6));
+      carGroup.rotation.x = THREE.MathUtils.lerp(carGroup.rotation.x, targetPitch, 0.1);
+      carGroup.rotation.z = THREE.MathUtils.lerp(carGroup.rotation.z, targetRoll, 0.1);
+    } else {
+      carGroup.rotation.x = THREE.MathUtils.lerp(carGroup.rotation.x, 0, 0.1);
+      carGroup.rotation.z = THREE.MathUtils.lerp(carGroup.rotation.z, 0, 0.1);
     }
 
     // Camera chase car

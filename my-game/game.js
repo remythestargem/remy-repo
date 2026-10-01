@@ -1,3 +1,18 @@
+
+// --- Performance Scratchpad (Zero per-frame allocations) ---
+const _scratchVec1 = new THREE.Vector3();
+const _scratchVec2 = new THREE.Vector3();
+const _scratchCamTarget = new THREE.Vector3();
+const _scratchRayOrigin = new THREE.Vector3();
+
+// --- FPS & Frame Time Tracker ---
+let frameCount = 0;
+let lastFpsUpdate = performance.now();
+let lastFrameTime = performance.now();
+let curFps = 60;
+let curFrameMs = 16.6;
+const fpsElem = document.getElementById('fps-counter');
+const frameTimeElem = document.getElementById('frametime-counter');
 // Spa Racing & Pursuit Engine - Three.js
 
 // Game State
@@ -299,7 +314,8 @@ function snapToSurface(pos, heightOffset = 0.5) {
   const pool = getNearbyColliders(pos, 45);
   if (pool.length === 0) return null;
 
-  const rayOrigin = new THREE.Vector3(pos.x, pos.y + 35, pos.z);
+  _scratchRayOrigin.set(pos.x, pos.y + 35, pos.z);
+  const rayOrigin = _scratchRayOrigin;
   downRay.set(rayOrigin, downDir);
   downRay.far = 100;
 
@@ -318,7 +334,8 @@ function checkBarrierCollision(origin, moveDir, dist = 1.8) {
   const pool = getNearbyColliders(origin, Math.max(dist + 5, 20));
   if (pool.length === 0) return false;
 
-  horizRay.set(new THREE.Vector3(origin.x, origin.y + 0.6, origin.z), moveDir);
+  _scratchRayOrigin.set(origin.x, origin.y + 0.6, origin.z);
+  horizRay.set(_scratchRayOrigin, moveDir);
   horizRay.far = dist;
 
   const hits = horizRay.intersectObjects(pool, false);
@@ -504,7 +521,8 @@ function animate(now) {
     const forwardZ = -Math.cos(state.car.heading);
     const metersPerSec = (state.car.speed * 1000) / 3600;
 
-    const moveVec = new THREE.Vector3(forwardX, 0, forwardZ).normalize();
+    _scratchVec1.set(forwardX, 0, forwardZ).normalize();
+    const moveVec = _scratchVec1;
     const barrierHit = checkBarrierCollision(state.car.position, moveVec, Math.abs(metersPerSec * dt) + 2.0);
 
     if (barrierHit) {
@@ -536,7 +554,8 @@ function animate(now) {
     const targetCamZ = state.car.position.z + Math.cos(state.car.heading) * camDistance;
     const targetCamY = state.car.position.y + camHeight;
 
-    camera.position.lerp(new THREE.Vector3(targetCamX, targetCamY, targetCamZ), 0.15);
+    _scratchCamTarget.set(targetCamX, targetCamY, targetCamZ);
+    camera.position.lerp(_scratchCamTarget, 0.15);
     camera.lookAt(state.car.position.x, state.car.position.y + 1.2, state.car.position.z);
 
   } else {
@@ -561,7 +580,8 @@ function animate(now) {
 
       const forwardX = -Math.sin(state.player.heading);
       const forwardZ = -Math.cos(state.player.heading);
-      const pMove = new THREE.Vector3(forwardX, 0, forwardZ).normalize();
+      _scratchVec1.set(forwardX, 0, forwardZ).normalize();
+      const pMove = _scratchVec1;
 
       const pBarrier = checkBarrierCollision(state.player.position, pMove, 1.0);
       if (!pBarrier) {
@@ -601,7 +621,8 @@ function animate(now) {
     const targetCamZ = state.player.position.z + Math.cos(state.player.heading) * pCamDist;
     const targetCamY = state.player.position.y + pCamHeight;
 
-    camera.position.lerp(new THREE.Vector3(targetCamX, targetCamY, targetCamZ), 0.18);
+    _scratchCamTarget.set(targetCamX, targetCamY, targetCamZ);
+    camera.position.lerp(_scratchCamTarget, 0.18);
     camera.lookAt(state.player.position.x, state.player.position.y + 1.2, state.player.position.z);
   }
 
@@ -610,7 +631,21 @@ function animate(now) {
   sun.position.set(activePos.x + 100, activePos.y + 200, activePos.z + 80);
   sun.target.position.copy(activePos);
 
-  updateHUD(dt);
+  // Measure FPS & Frame Time
+  frameCount++;
+  const frameMs = now - lastFrameTime;
+  lastFrameTime = now;
+  curFrameMs = (curFrameMs * 0.9) + (frameMs * 0.1);
+
+  if (now - lastFpsUpdate >= 250) {
+    curFps = Math.round((frameCount * 1000) / (now - lastFpsUpdate));
+    frameCount = 0;
+    lastFpsUpdate = now;
+    if (fpsElem) fpsElem.textContent = curFps + ' FPS';
+    if (frameTimeElem) frameTimeElem.textContent = curFrameMs.toFixed(1) + ' ms';
+    updateHUD(dt);
+  }
+
   renderer.render(scene, camera);
 }
 

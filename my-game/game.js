@@ -1,18 +1,31 @@
-// Spa Racing Engine - Three.js
+// Spa Racing & Pursuit Engine - Three.js
 
+// Game State
 const state = {
-  speed: 0,
-  maxSpeed: 210, // km/h
-  accel: 55,
-  brakePower: 90,
-  reverseSpeed: 40,
-  friction: 0.985,
-  steering: 0,
-  steerAngle: 0,
-  steerMax: 0.035,
-  heading: 0,
-  position: new THREE.Vector3(0, 0.5, 0),
-  gear: 'N',
+  mode: 'car', // 'car' or 'foot'
+  car: {
+    speed: 0,
+    maxSpeed: 210, // km/h
+    accel: 55,
+    brakePower: 90,
+    reverseSpeed: 40,
+    friction: 0.985,
+    offRoadFriction: 0.965,
+    steerAngle: 0,
+    steerMax: 0.035,
+    heading: 0,
+    position: new THREE.Vector3(0, 1.0, 0),
+    normal: new THREE.Vector3(0, 1, 0),
+    gear: 'N',
+    isOnRoad: true
+  },
+  player: {
+    position: new THREE.Vector3(2, 0, 0),
+    heading: 0,
+    speed: 0,
+    walkSpeed: 9.0, // m/s (~32 km/h sprint)
+    walkCycle: 0
+  },
   lapStartTime: Date.now()
 };
 
@@ -29,9 +42,9 @@ const canvas = document.getElementById('game-canvas');
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x7fb5e6);
-scene.fog = new THREE.FogExp2(0x7fb5e6, 0.0018);
+scene.fog = new THREE.FogExp2(0x7fb5e6, 0.0015);
 
-const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 2000);
+const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 4000);
 const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -39,32 +52,33 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 // Lighting
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
 scene.add(ambientLight);
 
-const sun = new THREE.DirectionalLight(0xfff8e7, 1.2);
-sun.position.set(150, 220, 100);
+const sun = new THREE.DirectionalLight(0xfff8e7, 1.25);
+sun.position.set(150, 300, 100);
 sun.castShadow = true;
 sun.shadow.mapSize.width = 2048;
 sun.shadow.mapSize.height = 2048;
 sun.shadow.camera.near = 10;
-sun.shadow.camera.far = 600;
-const d = 120;
+sun.shadow.camera.far = 800;
+const d = 160;
 sun.shadow.camera.left = -d;
 sun.shadow.camera.right = d;
 sun.shadow.camera.top = d;
 sun.shadow.camera.bottom = -d;
 scene.add(sun);
 
-// Car object container
+// --- Visual Models ---
+
+// 1. Car Object
 const carGroup = new THREE.Group();
 scene.add(carGroup);
 
-// Procedural starter sports car
 function createCarMesh() {
   const car = new THREE.Group();
 
-  // Main chassis
+  // Chassis
   const bodyGeo = new THREE.BoxGeometry(1.9, 0.55, 4.2);
   const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd91b1b, roughness: 0.25, metalness: 0.7 });
   const body = new THREE.Mesh(bodyGeo, bodyMat);
@@ -72,7 +86,7 @@ function createCarMesh() {
   body.castShadow = true;
   car.add(body);
 
-  // Cabin / Windshield
+  // Cabin
   const cabinGeo = new THREE.BoxGeometry(1.5, 0.45, 2.0);
   const cabinMat = new THREE.MeshStandardMaterial({ color: 0x111625, roughness: 0.1, metalness: 0.9 });
   const cabin = new THREE.Mesh(cabinGeo, cabinMat);
@@ -113,66 +127,85 @@ function createCarMesh() {
 const carVisual = createCarMesh();
 carGroup.add(carVisual);
 
-// Ground plane
-const groundGeo = new THREE.PlaneGeometry(2500, 2500);
-const groundMat = new THREE.MeshStandardMaterial({ color: 0x2d5a27, roughness: 0.9 });
+// 2. Player Humanoid Character
+const playerGroup = new THREE.Group();
+playerGroup.visible = false;
+scene.add(playerGroup);
+
+let leftArmMesh, rightArmMesh, leftLegMesh, rightLegMesh;
+
+function createPlayerCharacter() {
+  const p = new THREE.Group();
+
+  // Torso / Jacket
+  const torso = new THREE.Mesh(
+    new THREE.BoxGeometry(0.6, 0.8, 0.35),
+    new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.7 })
+  );
+  torso.position.y = 1.1;
+  torso.castShadow = true;
+  p.add(torso);
+
+  // Head / Helmet
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.22, 16, 16),
+    new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.3, metalness: 0.5 })
+  );
+  head.position.y = 1.7;
+  head.castShadow = true;
+  p.add(head);
+
+  // Visor
+  const visor = new THREE.Mesh(
+    new THREE.BoxGeometry(0.28, 0.12, 0.15),
+    new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.1, metalness: 0.9 })
+  );
+  visor.position.set(0, 1.7, -0.18);
+  p.add(visor);
+
+  // Limbs
+  const armGeo = new THREE.BoxGeometry(0.18, 0.65, 0.18);
+  const armMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.6 });
+  
+  leftArmMesh = new THREE.Mesh(armGeo, armMat);
+  leftArmMesh.position.set(-0.42, 1.05, 0);
+  p.add(leftArmMesh);
+
+  rightArmMesh = new THREE.Mesh(armGeo, armMat);
+  rightArmMesh.position.set(0.42, 1.05, 0);
+  p.add(rightArmMesh);
+
+  const legGeo = new THREE.BoxGeometry(0.22, 0.75, 0.22);
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.8 });
+
+  leftLegMesh = new THREE.Mesh(legGeo, legMat);
+  leftLegMesh.position.set(-0.18, 0.4, 0);
+  p.add(leftLegMesh);
+
+  rightLegMesh = new THREE.Mesh(legGeo, legMat);
+  rightLegMesh.position.set(0.18, 0.4, 0);
+  p.add(rightLegMesh);
+
+  return p;
+}
+
+const playerVisual = createPlayerCharacter();
+playerGroup.add(playerVisual);
+
+// Ground plane fallback (infinite green horizon)
+const groundGeo = new THREE.PlaneGeometry(8000, 8000);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x225522, roughness: 0.95 });
 const ground = new THREE.Mesh(groundGeo, groundMat);
 ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.5;
 ground.receiveShadow = true;
 scene.add(ground);
 
-// Starter racetrack ribbon
-function createFallbackCircuit() {
-  const curve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0, 0.05, 0),
-    new THREE.Vector3(0, 0.05, -200),
-    new THREE.Vector3(120, 0.05, -350),
-    new THREE.Vector3(300, 0.05, -300),
-    new THREE.Vector3(320, 0.05, -100),
-    new THREE.Vector3(220, 0.05, 80),
-    new THREE.Vector3(80, 0.05, 120),
-    new THREE.Vector3(-80, 0.05, 80)
-  ], true);
-
-  const points = curve.getPoints(250);
-  const trackShape = new THREE.Shape();
-  const width = 12;
-  trackShape.moveTo(-width / 2, 0);
-  trackShape.lineTo(width / 2, 0);
-
-  const trackGeo = new THREE.BufferGeometry();
-  const verts = [];
-  const uvs = [];
-
-  for (let i = 0; i < points.length; i++) {
-    const p1 = points[i];
-    const p2 = points[(i + 1) % points.length];
-    const dir = new THREE.Vector3().subVectors(p2, p1).normalize();
-    const up = new THREE.Vector3(0, 1, 0);
-    const side = new THREE.Vector3().crossVectors(dir, up).normalize().multiplyScalar(width);
-
-    verts.push(p1.x - side.x, 0.05, p1.z - side.z);
-    verts.push(p1.x + side.x, 0.05, p1.z + side.z);
-    verts.push(p2.x - side.x, 0.05, p2.z - side.z);
-
-    verts.push(p1.x + side.x, 0.05, p1.z + side.z);
-    verts.push(p2.x + side.x, 0.05, p2.z + side.z);
-    verts.push(p2.x - side.x, 0.05, p2.z - side.z);
-  }
-
-  trackGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-  trackGeo.computeVertexNormals();
-
-  const trackMat = new THREE.MeshStandardMaterial({ color: 0x22252a, roughness: 0.8 });
-  const trackMesh = new THREE.Mesh(trackGeo, trackMat);
-  trackMesh.receiveShadow = true;
-  scene.add(trackMesh);
-}
-
-createFallbackCircuit();
-
-// Try loading Spa-Francorchamps model from local assets if present
+// --- Track & Environment Loading ---
 const loader = new THREE.GLTFLoader();
+const trackColliders = [];
+let trackLoaded = false;
+
 const trackPaths = [
   'assets/track/track.glb',
   'assets/track/scene.gltf'
@@ -189,15 +222,22 @@ function tryLoadTrack(index = 0) {
   loader.load(
     trackPaths[index],
     (gltf) => {
-      console.log('Track model loaded successfully:', trackPaths[index]);
+      console.log('Spa track loaded successfully:', trackPaths[index]);
       const trackModel = gltf.scene;
+      
       trackModel.traverse((child) => {
         if (child.isMesh) {
           child.receiveShadow = true;
           child.castShadow = true;
+          trackColliders.push(child);
         }
       });
       scene.add(trackModel);
+      trackLoaded = true;
+
+      // Find initial ground height for car
+      snapToSurface(state.car.position, 1.0);
+
       const overlay = document.getElementById('loading-overlay');
       if (overlay) overlay.style.opacity = '0';
       setTimeout(() => { if (overlay) overlay.style.display = 'none'; }, 500);
@@ -210,6 +250,106 @@ function tryLoadTrack(index = 0) {
 }
 
 tryLoadTrack(0);
+
+// --- Surface Raycasting & Collision Physics ---
+const downRay = new THREE.Raycaster();
+const downDir = new THREE.Vector3(0, -1, 0);
+
+function snapToSurface(pos, heightOffset = 0.5) {
+  if (trackColliders.length === 0) return 0;
+  
+  // Cast ray downwards from above position
+  const rayOrigin = new THREE.Vector3(pos.x, pos.y + 40, pos.z);
+  downRay.set(rayOrigin, downDir);
+  downRay.far = 120;
+
+  const hits = downRay.intersectObjects(trackColliders, false);
+  if (hits.length > 0) {
+    const hit = hits[0];
+    pos.y = hit.point.y + heightOffset;
+    return hit;
+  }
+  return null;
+}
+
+// Barrier Collision Check (Detect vertical walls / guardrails)
+const horizRay = new THREE.Raycaster();
+function checkBarrierCollision(origin, moveDir, dist = 1.8) {
+  if (trackColliders.length === 0) return false;
+
+  horizRay.set(new THREE.Vector3(origin.x, origin.y + 0.6, origin.z), moveDir);
+  horizRay.far = dist;
+
+  const hits = horizRay.intersectObjects(trackColliders, false);
+  if (hits.length > 0) {
+    const hit = hits[0];
+    // If the hit surface is steep (wall, guardrail, tire stack), block movement
+    if (hit.face && Math.abs(hit.face.normal.y) < 0.45) {
+      return hit;
+    }
+  }
+  return false;
+}
+
+// World edge boundaries
+const WORLD_BOUNDS = { minX: -1900, maxX: 1400, minZ: -3500, maxZ: 2550 };
+function enforceWorldPerimeter(pos) {
+  if (pos.x < WORLD_BOUNDS.minX) pos.x = WORLD_BOUNDS.minX;
+  if (pos.x > WORLD_BOUNDS.maxX) pos.x = WORLD_BOUNDS.maxX;
+  if (pos.z < WORLD_BOUNDS.minZ) pos.z = WORLD_BOUNDS.minZ;
+  if (pos.z > WORLD_BOUNDS.maxZ) pos.z = WORLD_BOUNDS.maxZ;
+}
+
+// --- Mode Toggle: Car / Foot ---
+const btnToggle = document.getElementById('btn-toggle-vehicle');
+const modeVal = document.getElementById('mode-val');
+const speedoBox = document.getElementById('speedo-box');
+
+function toggleMode() {
+  if (state.mode === 'car') {
+    // Exit Car -> switch to on-foot
+    state.mode = 'foot';
+    state.car.speed = 0;
+
+    // Spawn player to the left of the car
+    const sideX = Math.cos(state.car.heading) * 2.2;
+    const sideZ = -Math.sin(state.car.heading) * 2.2;
+    state.player.position.set(state.car.position.x + sideX, state.car.position.y, state.car.position.z + sideZ);
+    state.player.heading = state.car.heading;
+    snapToSurface(state.player.position, 0.0);
+
+    playerGroup.position.copy(state.player.position);
+    playerGroup.rotation.y = state.player.heading;
+    playerGroup.visible = true;
+
+    if (btnToggle) {
+      btnToggle.textContent = 'ENTER CAR';
+      btnToggle.style.background = 'rgba(34, 197, 94, 0.85)';
+    }
+    if (modeVal) modeVal.textContent = 'ON FOOT';
+    if (speedoBox) speedoBox.style.opacity = '0.3';
+  } else {
+    // Check distance to car
+    const distToCar = state.player.position.distanceTo(state.car.position);
+    if (distToCar <= 6.0) {
+      // Enter Car
+      state.mode = 'car';
+      playerGroup.visible = false;
+
+      if (btnToggle) {
+        btnToggle.textContent = 'EXIT CAR';
+        btnToggle.style.background = 'rgba(220, 38, 38, 0.85)';
+      }
+      if (modeVal) modeVal.textContent = 'IN CAR';
+      if (speedoBox) speedoBox.style.opacity = '1';
+    }
+  }
+}
+
+if (btnToggle) {
+  btnToggle.addEventListener('click', toggleMode);
+  btnToggle.addEventListener('touchstart', (e) => { e.preventDefault(); toggleMode(); });
+}
 
 // Input Handlers
 function setupInput() {
@@ -235,6 +375,7 @@ function setupInput() {
     if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') input.brake = true;
     if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') input.left = true;
     if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') input.right = true;
+    if (e.key === 'e' || e.key === 'E' || e.key === 'f' || e.key === 'F') toggleMode();
   });
 
   window.addEventListener('keyup', (e) => {
@@ -253,18 +394,22 @@ const gearElem = document.getElementById('gear-indicator');
 const lapTimeElem = document.getElementById('lap-time');
 
 function updateHUD(dt) {
-  const kmh = Math.round(Math.abs(state.speed));
-  if (speedElem) speedElem.textContent = kmh;
+  const kmh = Math.round(Math.abs(state.car.speed));
+  if (speedElem) speedElem.textContent = state.mode === 'car' ? kmh : Math.round(state.player.speed * 3.6);
 
   if (gearElem) {
-    if (state.speed < -1) state.gear = 'R';
-    else if (kmh === 0) state.gear = 'N';
-    else if (kmh < 45) state.gear = '1';
-    else if (kmh < 85) state.gear = '2';
-    else if (kmh < 130) state.gear = '3';
-    else if (kmh < 170) state.gear = '4';
-    else state.gear = '5';
-    gearElem.textContent = state.gear;
+    if (state.mode === 'car') {
+      if (state.car.speed < -1) state.car.gear = 'R';
+      else if (kmh === 0) state.car.gear = 'N';
+      else if (kmh < 45) state.car.gear = '1';
+      else if (kmh < 85) state.car.gear = '2';
+      else if (kmh < 130) state.car.gear = '3';
+      else if (kmh < 170) state.car.gear = '4';
+      else state.car.gear = '5';
+      gearElem.textContent = state.car.gear;
+    } else {
+      gearElem.textContent = 'RUN';
+    }
   }
 
   if (lapTimeElem) {
@@ -284,59 +429,146 @@ function animate(now) {
   const dt = Math.min((now - lastTime) / 1000, 0.1);
   lastTime = now;
 
-  // Acceleration / Braking
-  if (input.gas) {
-    state.speed += state.accel * dt;
-    if (state.speed > state.maxSpeed) state.speed = state.maxSpeed;
-  } else if (input.brake) {
-    if (state.speed > 5) {
-      state.speed -= state.brakePower * dt;
+  if (state.mode === 'car') {
+    // --- CAR PHYSICS ---
+    if (input.gas) {
+      state.car.speed += state.car.accel * dt;
+      if (state.car.speed > state.car.maxSpeed) state.car.speed = state.car.maxSpeed;
+    } else if (input.brake) {
+      if (state.car.speed > 5) {
+        state.car.speed -= state.car.brakePower * dt;
+      } else {
+        state.car.speed -= 25 * dt;
+        if (state.car.speed < -state.car.reverseSpeed) state.car.speed = -state.car.reverseSpeed;
+      }
     } else {
-      state.speed -= 25 * dt;
-      if (state.speed < -state.reverseSpeed) state.speed = -state.reverseSpeed;
+      state.car.speed *= Math.pow(state.car.friction, dt * 60);
+      if (Math.abs(state.car.speed) < 0.2) state.car.speed = 0;
     }
+
+    // Steering
+    if (input.left) {
+      state.car.steerAngle = Math.min(state.car.steerAngle + 3.0 * dt, 1);
+    } else if (input.right) {
+      state.car.steerAngle = Math.max(state.car.steerAngle - 3.0 * dt, -1);
+    } else {
+      state.car.steerAngle *= 0.8;
+    }
+
+    const speedFactor = Math.min(Math.abs(state.car.speed) / 50, 1);
+    const turnDirection = state.car.speed >= 0 ? 1 : -1;
+    state.car.heading += state.car.steerAngle * state.car.steerMax * speedFactor * turnDirection;
+
+    // Proposed forward motion
+    const forwardX = -Math.sin(state.car.heading);
+    const forwardZ = -Math.cos(state.car.heading);
+    const metersPerSec = (state.car.speed * 1000) / 3600;
+
+    const moveVec = new THREE.Vector3(forwardX, 0, forwardZ).normalize();
+    const barrierHit = checkBarrierCollision(state.car.position, moveVec, Math.abs(metersPerSec * dt) + 2.0);
+
+    if (barrierHit) {
+      // Barrier collision: bounce off wall, lose speed
+      state.car.speed = -state.car.speed * 0.35;
+    } else {
+      state.car.position.x += forwardX * metersPerSec * dt;
+      state.car.position.z += forwardZ * metersPerSec * dt;
+    }
+
+    // Snap to Spa track 3D elevation
+    const groundHit = snapToSurface(state.car.position, 0.45);
+    enforceWorldPerimeter(state.car.position);
+
+    carGroup.position.copy(state.car.position);
+    carGroup.rotation.y = state.car.heading;
+
+    // Pitch/roll alignment with hill terrain
+    if (groundHit && groundHit.face) {
+      const normal = groundHit.face.normal;
+      carGroup.rotation.x = THREE.MathUtils.lerp(carGroup.rotation.x, -normal.z * 0.8, 0.1);
+      carGroup.rotation.z = THREE.MathUtils.lerp(carGroup.rotation.z, normal.x * 0.8, 0.1);
+    }
+
+    // Camera chase car
+    const camDistance = 8.5;
+    const camHeight = 3.2;
+    const targetCamX = state.car.position.x + Math.sin(state.car.heading) * camDistance;
+    const targetCamZ = state.car.position.z + Math.cos(state.car.heading) * camDistance;
+    const targetCamY = state.car.position.y + camHeight;
+
+    camera.position.lerp(new THREE.Vector3(targetCamX, targetCamY, targetCamZ), 0.15);
+    camera.lookAt(state.car.position.x, state.car.position.y + 1.2, state.car.position.z);
+
   } else {
-    state.speed *= Math.pow(state.friction, dt * 60);
-    if (Math.abs(state.speed) < 0.2) state.speed = 0;
+    // --- ON-FOOT PLAYER PHYSICS ---
+    if (input.left) state.player.heading += 3.2 * dt;
+    if (input.right) state.player.heading -= 3.2 * dt;
+
+    let moveDir = 0;
+    if (input.gas) moveDir = 1;
+    else if (input.brake) moveDir = -0.5;
+
+    state.player.speed = moveDir * state.player.walkSpeed;
+
+    if (moveDir !== 0) {
+      state.player.walkCycle += dt * 10;
+      // Animate limbs
+      const swing = Math.sin(state.player.walkCycle) * 0.6;
+      if (leftArmMesh) leftArmMesh.rotation.x = swing;
+      if (rightArmMesh) rightArmMesh.rotation.x = -swing;
+      if (leftLegMesh) leftLegMesh.rotation.x = -swing;
+      if (rightLegMesh) rightLegMesh.rotation.x = swing;
+
+      const forwardX = -Math.sin(state.player.heading);
+      const forwardZ = -Math.cos(state.player.heading);
+      const pMove = new THREE.Vector3(forwardX, 0, forwardZ).normalize();
+
+      const pBarrier = checkBarrierCollision(state.player.position, pMove, 1.0);
+      if (!pBarrier) {
+        state.player.position.x += forwardX * state.player.speed * dt;
+        state.player.position.z += forwardZ * state.player.speed * dt;
+      }
+    } else {
+      // Idle pose
+      if (leftArmMesh) leftArmMesh.rotation.x = 0;
+      if (rightArmMesh) rightArmMesh.rotation.x = 0;
+      if (leftLegMesh) leftLegMesh.rotation.x = 0;
+      if (rightLegMesh) rightLegMesh.rotation.x = 0;
+    }
+
+    snapToSurface(state.player.position, 0.0);
+    enforceWorldPerimeter(state.player.position);
+
+    playerGroup.position.copy(state.player.position);
+    playerGroup.rotation.y = state.player.heading;
+
+    // Check enter car button state
+    const distToCar = state.player.position.distanceTo(state.car.position);
+    if (btnToggle) {
+      if (distToCar <= 6.0) {
+        btnToggle.textContent = 'ENTER CAR';
+        btnToggle.style.opacity = '1';
+      } else {
+        btnToggle.textContent = 'TOO FAR TO ENTER';
+        btnToggle.style.opacity = '0.5';
+      }
+    }
+
+    // Camera chase player
+    const pCamDist = 4.2;
+    const pCamHeight = 2.2;
+    const targetCamX = state.player.position.x + Math.sin(state.player.heading) * pCamDist;
+    const targetCamZ = state.player.position.z + Math.cos(state.player.heading) * pCamDist;
+    const targetCamY = state.player.position.y + pCamHeight;
+
+    camera.position.lerp(new THREE.Vector3(targetCamX, targetCamY, targetCamZ), 0.18);
+    camera.lookAt(state.player.position.x, state.player.position.y + 1.2, state.player.position.z);
   }
 
-  // Steering
-  if (input.left) {
-    state.steerAngle = Math.min(state.steerAngle + 3.0 * dt, 1);
-  } else if (input.right) {
-    state.steerAngle = Math.max(state.steerAngle - 3.0 * dt, -1);
-  } else {
-    state.steerAngle *= 0.8;
-  }
-
-  const speedFactor = Math.min(Math.abs(state.speed) / 50, 1);
-  const turnDirection = state.speed >= 0 ? 1 : -1;
-  state.heading += state.steerAngle * state.steerMax * speedFactor * turnDirection;
-
-  // Move car
-  const forwardX = -Math.sin(state.heading);
-  const forwardZ = -Math.cos(state.heading);
-  const metersPerSec = (state.speed * 1000) / 3600;
-
-  state.position.x += forwardX * metersPerSec * dt;
-  state.position.z += forwardZ * metersPerSec * dt;
-
-  carGroup.position.copy(state.position);
-  carGroup.rotation.y = state.heading;
-
-  // Camera third-person chase
-  const camDistance = 8.5;
-  const camHeight = 3.2;
-  const targetCamX = state.position.x + Math.sin(state.heading) * camDistance;
-  const targetCamZ = state.position.z + Math.cos(state.heading) * camDistance;
-  const targetCamY = state.position.y + camHeight;
-
-  camera.position.lerp(new THREE.Vector3(targetCamX, targetCamY, targetCamZ), 0.15);
-  camera.lookAt(state.position.x, state.position.y + 1.2, state.position.z);
-
-  // Update light to follow car
-  sun.position.set(state.position.x + 100, 200, state.position.z + 80);
-  sun.target = carGroup;
+  // Update light to follow active actor
+  const activePos = state.mode === 'car' ? state.car.position : state.player.position;
+  sun.position.set(activePos.x + 100, activePos.y + 200, activePos.z + 80);
+  sun.target.position.copy(activePos);
 
   updateHUD(dt);
   renderer.render(scene, camera);

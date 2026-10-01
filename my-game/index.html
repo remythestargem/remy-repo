@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Spa Racing</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Racing HUD -->
+    <div id="hud">
+      <div class="hud-top">
+        <div class="hud-box">
+          <span class="hud-label">LAP TIME</span>
+          <span id="lap-time" class="hud-val">00:00.00</span>
+        </div>
+        <div class="hud-box">
+          <span class="hud-label">TRACK</span>
+          <span class="hud-val">Spa-Francorchamps</span>
+        </div>
+      </div>
+
+      <div class="speedometer-container">
+        <div id="speedometer">0</div>
+        <div class="speed-unit">KM/H</div>
+        <div id="gear-indicator">N</div>
+      </div>
+    </div>
+
+    <!-- Mobile Touch Controls -->
+    <div id="touch-controls">
+      <!-- Steering buttons on left -->
+      <div class="steer-cluster">
+        <button id="btn-steer-left" class="control-btn steer-btn">◀</button>
+        <button id="btn-steer-right" class="control-btn steer-btn">▶</button>
+      </div>
+
+      <!-- Pedals on right -->
+      <div class="pedal-cluster">
+        <button id="btn-brake" class="control-btn pedal-btn brake-btn">BRAKE</button>
+        <button id="btn-gas" class="control-btn pedal-btn gas-btn">GAS</button>
+      </div>
+    </div>
+
+    <div id="loading-overlay">
+      <div class="spinner"></div>
+      <p id="loading-text">Loading Circuit & Environment...</p>
+    </div>
+  </div>
+
+  <script src="libs/three.min.js"></script>
+  <script src="libs/GLTFLoader.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>

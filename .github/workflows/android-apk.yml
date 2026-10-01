@@ -25,6 +25,12 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      - name: Download 3D track asset
+        run: |
+          mkdir -p my-game/assets/track
+          curl -fL "https://drive.usercontent.google.com/download?id=1RRDa4SuIEMT3ej1yLatr6gN_6_XAapXJ&export=download&confirm=t" -o my-game/assets/track/track.glb
+          ls -lh my-game/assets/track/track.glb
+
       - name: Create Android project
         run: |
           mkdir -p apk-build/www
@@ -34,8 +40,8 @@ jobs:
           npm install @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
           cat << 'EOF' > capacitor.config.json
           {
-            "appId": "com.remythestargem.islandadventure",
-            "appName": "Island Adventure",
+            "appId": "com.remythestargem.sparacing",
+            "appName": "Spa Racing",
             "webDir": "www"
           }
           EOF
@@ -50,6 +56,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: island-adventure-debug-apk
+          name: spa-racing-debug-apk
           path: apk-build/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

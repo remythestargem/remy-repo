@@ -63,7 +63,7 @@ html, body {
 }
 
 .hud-val {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 800;
   color: #ffffff;
   font-variant-numeric: tabular-nums;
@@ -81,6 +81,7 @@ html, body {
   text-align: center;
   min-width: 110px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  transition: opacity 0.2s ease;
 }
 
 #speedometer {
@@ -103,6 +104,30 @@ html, body {
   font-weight: 800;
   color: #ffff55;
   margin-top: 2px;
+}
+
+/* Enter / Exit Car Toggle Button */
+.action-btn {
+  position: absolute;
+  top: 76px;
+  right: 20px;
+  background: rgba(220, 38, 38, 0.85);
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 1px;
+  padding: 10px 18px;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  z-index: 50;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.action-btn:active {
+  transform: scale(0.95);
+  background: rgba(185, 28, 28, 1);
 }
 
 /* Touch Controls */

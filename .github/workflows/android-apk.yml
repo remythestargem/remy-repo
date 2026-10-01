@@ -31,6 +31,23 @@ jobs:
           curl -fL "https://drive.usercontent.google.com/download?id=1RRDa4SuIEMT3ej1yLatr6gN_6_XAapXJ&export=download&confirm=t" -o my-game/assets/track/track.glb
           ls -lh my-game/assets/track/track.glb
 
+      - name: Optimize track for mobile (gltf-transform pipeline)
+        run: |
+          cd my-game/assets/track
+          npx --yes @gltf-transform/cli@4.5.1 optimize track.glb track-mobile.glb \
+            --simplify true \
+            --simplify-ratio 0.15 \
+            --simplify-error 0.0002 \
+            --texture-compress webp \
+            --texture-size 1024 \
+            --compress quantize \
+            --join false \
+            --instance false \
+            --palette false \
+            --prune true
+          mv track-mobile.glb track.glb
+          ls -lh track.glb
+
       - name: Create Android project
         run: |
           mkdir -p apk-build/www

@@ -259,18 +259,34 @@ function tryLoadTrack(index = 0) {
           const mats = Array.isArray(mat) ? mat : [mat];
           let isFoliageOrObstacle = false;
 
-          mats.forEach((m) => {
-            if (!m) return;
-            m.precision = 'mediump';
+          // Mobile-grade materials: replace costly PBR (MeshStandardMaterial) with
+          // per-vertex Lambert shading to cut fragment shader cost on phone GPUs.
+          const converted = mats.map((m) => {
+            if (!m) return m;
             const matName = (m.name || '').toLowerCase();
-            // Optimize foliage & transparent surfaces for mobile GPU
-            if (matName.includes('tree') || matName.includes('leaf') || matName.includes('veg') || matName.includes('fence') || matName.includes('alpha')) {
-              isFoliageOrObstacle = true;
+            const isFoliage = matName.includes('tree') || matName.includes('leaf') || matName.includes('veg') || matName.includes('fence') || matName.includes('alpha');
+            if (isFoliage) isFoliageOrObstacle = true;
+
+            if (m.isMeshStandardMaterial || m.isMeshPhysicalMaterial) {
+              return new THREE.MeshLambertMaterial({
+                name: m.name,
+                map: m.map || null,
+                color: m.color ? m.color.clone() : new THREE.Color(0xffffff),
+                transparent: false,
+                alphaTest: (isFoliage || m.transparent) ? 0.5 : 0,
+                depthWrite: true,
+                side: m.side,
+                vertexColors: m.vertexColors
+              });
+            }
+            if (isFoliage) {
               m.transparent = false;
               m.alphaTest = 0.5;
               m.depthWrite = true;
             }
+            return m;
           });
+          child.material = Array.isArray(mat) ? converted : converted[0];
 
           // Only road, terrain, grass, curbs, and asphalt should be ground colliders
           if (!isFoliageOrObstacle) {

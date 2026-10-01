@@ -10,12 +10,16 @@
   <div id="game-container">
     <canvas id="game-canvas"></canvas>
 
-    <!-- Racing HUD -->
+    <!-- Racing / Player HUD -->
     <div id="hud">
       <div class="hud-top">
         <div class="hud-box">
-          <span class="hud-label">LAP TIME</span>
+          <span class="hud-label">TIME</span>
           <span id="lap-time" class="hud-val">00:00.00</span>
+        </div>
+        <div class="hud-box">
+          <span class="hud-label">MODE</span>
+          <span id="mode-val" class="hud-val">IN CAR</span>
         </div>
         <div class="hud-box">
           <span class="hud-label">TRACK</span>
@@ -23,22 +27,25 @@
         </div>
       </div>
 
-      <div class="speedometer-container">
+      <div class="speedometer-container" id="speedo-box">
         <div id="speedometer">0</div>
         <div class="speed-unit">KM/H</div>
         <div id="gear-indicator">N</div>
       </div>
     </div>
 
+    <!-- Toggle Car/Foot Button -->
+    <button id="btn-toggle-vehicle" class="action-btn">EXIT CAR</button>
+
     <!-- Mobile Touch Controls -->
     <div id="touch-controls">
-      <!-- Steering buttons on left -->
+      <!-- Steering / Movement buttons on left -->
       <div class="steer-cluster">
         <button id="btn-steer-left" class="control-btn steer-btn">◀</button>
         <button id="btn-steer-right" class="control-btn steer-btn">▶</button>
       </div>
 
-      <!-- Pedals on right -->
+      <!-- Pedals / Actions on right -->
       <div class="pedal-cluster">
         <button id="btn-brake" class="control-btn pedal-btn brake-btn">BRAKE</button>
         <button id="btn-gas" class="control-btn pedal-btn gas-btn">GAS</button>

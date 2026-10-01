@@ -42,14 +42,18 @@ const canvas = document.getElementById('game-canvas');
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x7fb5e6);
-scene.fog = new THREE.FogExp2(0x7fb5e6, 0.0015);
+scene.fog = new THREE.Fog(0x7fb5e6, 250, 750);
 
-const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 4000);
-const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: 'high-performance' });
+const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.5, 750);
+const renderer = new THREE.WebGLRenderer({
+  canvas: canvas,
+  antialias: false,
+  powerPreference: 'high-performance',
+  precision: 'mediump'
+});
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.0));
+renderer.shadowMap.enabled = false;
 
 // Lighting
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
@@ -225,10 +229,23 @@ function tryLoadTrack(index = 0) {
       console.log('Spa track loaded successfully:', trackPaths[index]);
       const trackModel = gltf.scene;
       
+      trackModel.updateMatrixWorld(true);
       trackModel.traverse((child) => {
         if (child.isMesh) {
-          child.receiveShadow = true;
-          child.castShadow = true;
+          child.castShadow = false;
+          child.receiveShadow = false;
+          if (child.geometry) {
+            child.geometry.computeBoundingBox();
+            const wBox = new THREE.Box3().copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
+            child.userData.worldBox = wBox;
+          }
+          if (child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach((m) => { m.precision = 'mediump'; });
+            } else {
+              child.material.precision = 'mediump';
+            }
+          }
           trackColliders.push(child);
         }
       });
@@ -251,19 +268,42 @@ function tryLoadTrack(index = 0) {
 
 tryLoadTrack(0);
 
-// --- Surface Raycasting & Collision Physics ---
+// --- Optimized Surface Raycasting & Collision Physics ---
 const downRay = new THREE.Raycaster();
 const downDir = new THREE.Vector3(0, -1, 0);
+const horizRay = new THREE.Raycaster();
+const nearbyColliders = [];
+const candidateBox = new THREE.Box3();
+
+function getNearbyColliders(pos, radius = 40) {
+  nearbyColliders.length = 0;
+  candidateBox.min.set(pos.x - radius, pos.y - 70, pos.z - radius);
+  candidateBox.max.set(pos.x + radius, pos.y + 70, pos.z + radius);
+
+  for (let i = 0; i < trackColliders.length; i++) {
+    const mesh = trackColliders[i];
+    if (mesh.userData.worldBox) {
+      if (candidateBox.intersectsBox(mesh.userData.worldBox)) {
+        nearbyColliders.push(mesh);
+      }
+    } else {
+      nearbyColliders.push(mesh);
+    }
+  }
+  return nearbyColliders;
+}
 
 function snapToSurface(pos, heightOffset = 0.5) {
-  if (trackColliders.length === 0) return 0;
+  if (trackColliders.length === 0) return null;
   
-  // Cast ray downwards from above position
-  const rayOrigin = new THREE.Vector3(pos.x, pos.y + 40, pos.z);
-  downRay.set(rayOrigin, downDir);
-  downRay.far = 120;
+  const pool = getNearbyColliders(pos, 45);
+  if (pool.length === 0) return null;
 
-  const hits = downRay.intersectObjects(trackColliders, false);
+  const rayOrigin = new THREE.Vector3(pos.x, pos.y + 35, pos.z);
+  downRay.set(rayOrigin, downDir);
+  downRay.far = 100;
+
+  const hits = downRay.intersectObjects(pool, false);
   if (hits.length > 0) {
     const hit = hits[0];
     pos.y = hit.point.y + heightOffset;
@@ -272,18 +312,18 @@ function snapToSurface(pos, heightOffset = 0.5) {
   return null;
 }
 
-// Barrier Collision Check (Detect vertical walls / guardrails)
-const horizRay = new THREE.Raycaster();
 function checkBarrierCollision(origin, moveDir, dist = 1.8) {
   if (trackColliders.length === 0) return false;
+
+  const pool = getNearbyColliders(origin, Math.max(dist + 5, 20));
+  if (pool.length === 0) return false;
 
   horizRay.set(new THREE.Vector3(origin.x, origin.y + 0.6, origin.z), moveDir);
   horizRay.far = dist;
 
-  const hits = horizRay.intersectObjects(trackColliders, false);
+  const hits = horizRay.intersectObjects(pool, false);
   if (hits.length > 0) {
     const hit = hits[0];
-    // If the hit surface is steep (wall, guardrail, tire stack), block movement
     if (hit.face && Math.abs(hit.face.normal.y) < 0.45) {
       return hit;
     }

@@ -13,6 +13,12 @@
     <!-- Racing / Player HUD -->
     <div id="hud">
       <div class="hud-top">
+        <div class="hud-box" id="perf-box" style="background: rgba(0,0,0,0.65); border: 1px solid rgba(255,255,255,0.2);">
+          <span class="hud-label" style="color: #4ade80;">PERF</span>
+          <span class="hud-value" id="fps-counter" style="font-size: 1.1rem; color: #4ade80;">-- FPS</span>
+          <span id="frametime-counter" style="font-size: 0.75rem; color: #cbd5e1;">-- ms</span>
+        </div>
+
         <div class="hud-box">
           <span class="hud-label">TIME</span>
           <span id="lap-time" class="hud-val">00:00.00</span>

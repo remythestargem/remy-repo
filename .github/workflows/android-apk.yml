@@ -47,7 +47,7 @@ jobs:
           EOF
           CI=true npx cap add android
           # Enforce automatic landscape orientation in AndroidManifest.xml
-          sed -i 's/android:name=".MainActivity"/android:name=".MainActivity" android:screenOrientation="sensorLandscape"/' android/app/src/main/AndroidManifest.xml
+          sed -i 's/android:name=".MainActivity"/android:name=".MainActivity" android:hardwareAccelerated="true" android:screenOrientation="sensorLandscape"/' android/app/src/main/AndroidManifest.xml
           npx cap sync android
 
       - name: Build debug APK

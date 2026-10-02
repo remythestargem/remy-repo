@@ -343,6 +343,8 @@ button {
 #loading-overlay.webgl-error {
   justify-content: center;
   padding-bottom: calc(var(--safe-bottom) + 20px);
+  background-color: #132222;
+  background-image: none;
 }
 
 #loading-overlay.webgl-error #loading-text {

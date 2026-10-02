@@ -50,25 +50,106 @@ const input = {
   left: false,
   right: false
 };
+const keyboardInput = { gas: false, brake: false, left: false, right: false };
+const pointerInputCounts = { gas: 0, brake: 0, left: 0, right: 0 };
+const activePointers = new Map();
+const inputKeys = Object.keys(input);
+
+function refreshInput(key) {
+  input[key] = keyboardInput[key] || pointerInputCounts[key] > 0;
+}
+
+function releaseAllInputs() {
+  activePointers.forEach(({ element }, pointerId) => {
+    if (element.hasPointerCapture?.(pointerId)) {
+      element.releasePointerCapture(pointerId);
+    }
+  });
+  activePointers.clear();
+
+  for (const key of inputKeys) {
+    keyboardInput[key] = false;
+    pointerInputCounts[key] = 0;
+    refreshInput(key);
+  }
+
+  document.querySelectorAll('.control-btn.active').forEach((element) => {
+    element.classList.remove('active');
+  });
+}
 
 // Scene setup
 const container = document.getElementById('game-container');
 const canvas = document.getElementById('game-canvas');
+const hasCoarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+const isMobileDevice = hasCoarsePointer || 'ontouchstart' in window;
+const maxDevicePixelRatio = isMobileDevice ? 1 : 1.25;
+const minMobileRenderScale = 0.65;
+let renderScale = isMobileDevice ? 0.9 : 1;
+let lastQualityCheck = performance.now();
+let stableFrameTimeSince = 0;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x7fb5e6);
 scene.fog = new THREE.Fog(0x7fb5e6, 250, 750);
 
 const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.5, 750);
-const renderer = new THREE.WebGLRenderer({
-  canvas: canvas,
-  antialias: false,
-  powerPreference: 'high-performance',
-  precision: 'mediump'
-});
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.0));
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({
+    canvas: canvas,
+    antialias: false,
+    powerPreference: 'high-performance',
+    precision: 'mediump'
+  });
+} catch (error) {
+  const overlay = document.getElementById('loading-overlay');
+  const message = document.getElementById('loading-text');
+  if (overlay) {
+    overlay.classList.add('webgl-error');
+    overlay.setAttribute('role', 'alert');
+  }
+  if (message) message.textContent = '3D graphics are unavailable. Enable WebGL to play.';
+  document.querySelector('.spinner')?.remove();
+  throw error;
+}
+
 renderer.shadowMap.enabled = false;
+
+function applyRenderScale() {
+  const width = container.clientWidth || window.innerWidth;
+  const height = container.clientHeight || window.innerHeight;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDevicePixelRatio) * renderScale);
+  renderer.setSize(width, height, false);
+  camera.aspect = width / Math.max(height, 1);
+  camera.updateProjectionMatrix();
+}
+
+function adaptMobileRenderScale(now) {
+  if (!isMobileDevice || now - lastQualityCheck < 2000) return;
+  lastQualityCheck = now;
+
+  if (curFrameMs > 24 && renderScale > minMobileRenderScale) {
+    renderScale = Math.max(minMobileRenderScale, renderScale - 0.1);
+    stableFrameTimeSince = 0;
+    applyRenderScale();
+    return;
+  }
+
+  if (curFrameMs < 16.5 && renderScale < 1) {
+    if (stableFrameTimeSince === 0) stableFrameTimeSince = now;
+    if (now - stableFrameTimeSince >= 8000) {
+      renderScale = Math.min(1, renderScale + 0.05);
+      stableFrameTimeSince = now;
+      applyRenderScale();
+    }
+    return;
+  }
+
+  stableFrameTimeSince = 0;
+}
+
+applyRenderScale();
 
 // Lighting
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
@@ -76,16 +157,7 @@ scene.add(ambientLight);
 
 const sun = new THREE.DirectionalLight(0xfff8e7, 1.25);
 sun.position.set(150, 300, 100);
-sun.castShadow = true;
-sun.shadow.mapSize.width = 2048;
-sun.shadow.mapSize.height = 2048;
-sun.shadow.camera.near = 10;
-sun.shadow.camera.far = 800;
-const d = 160;
-sun.shadow.camera.left = -d;
-sun.shadow.camera.right = d;
-sun.shadow.camera.top = d;
-sun.shadow.camera.bottom = -d;
+sun.castShadow = false;
 scene.add(sun);
 
 // --- Visual Models ---
@@ -223,6 +295,10 @@ scene.add(ground);
 // --- Track & Environment Loading ---
 const loader = new THREE.GLTFLoader();
 const trackColliders = [];
+const colliderGrid = new Map();
+const unindexedColliders = [];
+const colliderGridCellSize = 64;
+let colliderQuerySequence = 0;
 let trackLoaded = false;
 
 const trackPaths = [
@@ -291,6 +367,7 @@ function tryLoadTrack(index = 0) {
           // Only road, terrain, grass, curbs, and asphalt should be ground colliders
           if (!isFoliageOrObstacle) {
             trackColliders.push(child);
+            addColliderToGrid(child);
           }
         }
       });
@@ -320,19 +397,78 @@ const horizRay = new THREE.Raycaster();
 const nearbyColliders = [];
 const candidateBox = new THREE.Box3();
 
+function getColliderCell(cellX, cellZ, create = false) {
+  let row = colliderGrid.get(cellX);
+  if (!row) {
+    if (!create) return null;
+    row = new Map();
+    colliderGrid.set(cellX, row);
+  }
+
+  let cell = row.get(cellZ);
+  if (!cell && create) {
+    cell = [];
+    row.set(cellZ, cell);
+  }
+  return cell || null;
+}
+
+function addColliderToGrid(mesh) {
+  const box = mesh.userData.worldBox;
+  if (!box) {
+    unindexedColliders.push(mesh);
+    return;
+  }
+
+  const minCellX = Math.floor(box.min.x / colliderGridCellSize);
+  const maxCellX = Math.floor(box.max.x / colliderGridCellSize);
+  const minCellZ = Math.floor(box.min.z / colliderGridCellSize);
+  const maxCellZ = Math.floor(box.max.z / colliderGridCellSize);
+  const coveredCells = (maxCellX - minCellX + 1) * (maxCellZ - minCellZ + 1);
+
+  // Keep giant terrain meshes out of the grid; checking a short fallback list
+  // is cheaper than inserting one mesh into hundreds of cells.
+  if (!Number.isFinite(coveredCells) || coveredCells > 256) {
+    unindexedColliders.push(mesh);
+    return;
+  }
+
+  for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
+    for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ++) {
+      getColliderCell(cellX, cellZ, true).push(mesh);
+    }
+  }
+}
+
+function addNearbyCollider(mesh, queryId) {
+  if (mesh.userData.lastColliderQuery === queryId) return;
+  mesh.userData.lastColliderQuery = queryId;
+  if (!mesh.userData.worldBox || candidateBox.intersectsBox(mesh.userData.worldBox)) {
+    nearbyColliders.push(mesh);
+  }
+}
+
 function getNearbyColliders(pos, radius = 40) {
   nearbyColliders.length = 0;
   candidateBox.min.set(pos.x - radius, pos.y - 70, pos.z - radius);
   candidateBox.max.set(pos.x + radius, pos.y + 70, pos.z + radius);
 
-  for (let i = 0; i < trackColliders.length; i++) {
-    const mesh = trackColliders[i];
-    if (mesh.userData.worldBox) {
-      if (candidateBox.intersectsBox(mesh.userData.worldBox)) {
-        nearbyColliders.push(mesh);
+  const queryId = ++colliderQuerySequence;
+  for (let i = 0; i < unindexedColliders.length; i++) {
+    addNearbyCollider(unindexedColliders[i], queryId);
+  }
+
+  const minCellX = Math.floor(candidateBox.min.x / colliderGridCellSize);
+  const maxCellX = Math.floor(candidateBox.max.x / colliderGridCellSize);
+  const minCellZ = Math.floor(candidateBox.min.z / colliderGridCellSize);
+  const maxCellZ = Math.floor(candidateBox.max.z / colliderGridCellSize);
+  for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
+    for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ++) {
+      const cell = getColliderCell(cellX, cellZ);
+      if (!cell) continue;
+      for (let i = 0; i < cell.length; i++) {
+        addNearbyCollider(cell[i], queryId);
       }
-    } else {
-      nearbyColliders.push(mesh);
     }
   }
   return nearbyColliders;
@@ -393,6 +529,7 @@ const modeVal = document.getElementById('mode-val');
 const speedoBox = document.getElementById('speedo-box');
 
 function toggleMode() {
+  releaseAllInputs();
   if (state.mode === 'car') {
     // Exit Car -> switch to on-foot
     state.mode = 'foot';
@@ -435,41 +572,80 @@ function toggleMode() {
 
 if (btnToggle) {
   btnToggle.addEventListener('click', toggleMode);
-  btnToggle.addEventListener('touchstart', (e) => { e.preventDefault(); toggleMode(); });
 }
 
 // Input Handlers
 function setupInput() {
-  const bindTouch = (id, key) => {
+  const bindPointer = (id, key) => {
     const el = document.getElementById(id);
     if (!el) return;
-    const start = (e) => { e.preventDefault(); input[key] = true; el.classList.add('active'); };
-    const end = (e) => { e.preventDefault(); input[key] = false; el.classList.remove('active'); };
-    el.addEventListener('touchstart', start, { passive: false });
-    el.addEventListener('touchend', end, { passive: false });
-    el.addEventListener('mousedown', start);
-    el.addEventListener('mouseup', end);
-    el.addEventListener('mouseleave', end);
+    el.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      if (activePointers.has(event.pointerId)) return;
+      event.preventDefault();
+
+      activePointers.set(event.pointerId, { key, element: el });
+      pointerInputCounts[key]++;
+      refreshInput(key);
+      el.classList.add('active');
+      el.setPointerCapture?.(event.pointerId);
+    });
+
+    const releasePointer = (event) => {
+      const activePointer = activePointers.get(event.pointerId);
+      if (!activePointer) return;
+      if (event.cancelable) event.preventDefault();
+
+      activePointers.delete(event.pointerId);
+      pointerInputCounts[activePointer.key] = Math.max(0, pointerInputCounts[activePointer.key] - 1);
+      refreshInput(activePointer.key);
+      if (pointerInputCounts[activePointer.key] === 0) {
+        activePointer.element.classList.remove('active');
+      }
+    };
+
+    el.addEventListener('pointerup', releasePointer);
+    el.addEventListener('pointercancel', releasePointer);
+    el.addEventListener('lostpointercapture', releasePointer);
   };
 
-  bindTouch('btn-gas', 'gas');
-  bindTouch('btn-brake', 'brake');
-  bindTouch('btn-steer-left', 'left');
-  bindTouch('btn-steer-right', 'right');
+  bindPointer('btn-gas', 'gas');
+  bindPointer('btn-brake', 'brake');
+  bindPointer('btn-steer-left', 'left');
+  bindPointer('btn-steer-right', 'right');
 
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') input.gas = true;
-    if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') input.brake = true;
-    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') input.left = true;
-    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') input.right = true;
-    if (e.key === 'e' || e.key === 'E' || e.key === 'f' || e.key === 'F') toggleMode();
+    const key = e.key.toLowerCase();
+    const inputKey = key === 'arrowup' || key === 'w' ? 'gas'
+      : key === 'arrowdown' || key === 's' ? 'brake'
+        : key === 'arrowleft' || key === 'a' ? 'left'
+          : key === 'arrowright' || key === 'd' ? 'right'
+            : null;
+
+    if (inputKey) {
+      e.preventDefault();
+      keyboardInput[inputKey] = true;
+      refreshInput(inputKey);
+    } else if (!e.repeat && (key === 'e' || key === 'f')) {
+      toggleMode();
+    }
   });
 
   window.addEventListener('keyup', (e) => {
-    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') input.gas = false;
-    if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') input.brake = false;
-    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') input.left = false;
-    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') input.right = false;
+    const key = e.key.toLowerCase();
+    const inputKey = key === 'arrowup' || key === 'w' ? 'gas'
+      : key === 'arrowdown' || key === 's' ? 'brake'
+        : key === 'arrowleft' || key === 'a' ? 'left'
+          : key === 'arrowright' || key === 'd' ? 'right'
+            : null;
+    if (!inputKey) return;
+    keyboardInput[inputKey] = false;
+    refreshInput(inputKey);
+  });
+
+  window.addEventListener('blur', releaseAllInputs);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) releaseAllInputs();
   });
 }
 
@@ -510,9 +686,11 @@ function updateHUD(dt) {
 
 // Physics Loop
 let lastTime = performance.now();
+let animationFrameId = 0;
 
 function animate(now) {
-  requestAnimationFrame(animate);
+  animationFrameId = 0;
+  if (document.hidden) return;
   const dt = Math.min((now - lastTime) / 1000, 0.1);
   lastTime = now;
 
@@ -534,12 +712,11 @@ function animate(now) {
     }
 
     // Steering
-    if (input.left) {
-      state.car.steerAngle = Math.min(state.car.steerAngle + 3.0 * dt, 1);
-    } else if (input.right) {
-      state.car.steerAngle = Math.max(state.car.steerAngle - 3.0 * dt, -1);
+    const steerInput = Number(input.left) - Number(input.right);
+    if (steerInput !== 0) {
+      state.car.steerAngle = THREE.MathUtils.clamp(state.car.steerAngle + steerInput * 3.0 * dt, -1, 1);
     } else {
-      state.car.steerAngle *= 0.8;
+      state.car.steerAngle *= Math.pow(0.8, dt * 60);
     }
 
     const speedFactor = Math.min(Math.abs(state.car.speed) / 50, 1);
@@ -671,6 +848,7 @@ function animate(now) {
   const frameMs = now - lastFrameTime;
   lastFrameTime = now;
   curFrameMs = (curFrameMs * 0.9) + (frameMs * 0.1);
+  adaptMobileRenderScale(now);
 
   if (now - lastFpsUpdate >= 250) {
     curFps = Math.round((frameCount * 1000) / (now - lastFpsUpdate));
@@ -682,13 +860,31 @@ function animate(now) {
   }
 
   renderer.render(scene, camera);
+  animationFrameId = requestAnimationFrame(animate);
 }
 
-requestAnimationFrame(animate);
+function startAnimation() {
+  if (animationFrameId === 0 && !document.hidden) {
+    animationFrameId = requestAnimationFrame(animate);
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (animationFrameId !== 0) cancelAnimationFrame(animationFrameId);
+    animationFrameId = 0;
+    return;
+  }
+
+  lastTime = performance.now();
+  lastFrameTime = lastTime;
+  lastFpsUpdate = lastTime;
+  frameCount = 0;
+  startAnimation();
+});
+
+startAnimation();
 
 // Window resize
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+window.addEventListener('resize', applyRenderScale, { passive: true });
+window.visualViewport?.addEventListener('resize', applyRenderScale, { passive: true });

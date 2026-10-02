@@ -41,18 +41,25 @@
       </div>
     </div>
 
+    <div id="look-hint" aria-hidden="true">DRAG TO LOOK</div>
+
     <!-- Toggle Car/Foot Button -->
     <button id="btn-toggle-vehicle" class="action-btn" type="button" aria-label="Exit or enter car">EXIT CAR</button>
 
     <!-- Mobile Touch Controls -->
-    <div id="touch-controls" aria-label="Touch driving controls">
-      <!-- Steering / Movement buttons on left -->
+    <div id="touch-controls" aria-label="Touch driving and movement controls">
+      <!-- Analog steering; becomes camera-relative movement while on foot -->
       <div class="steer-cluster">
-        <button id="btn-steer-left" class="control-btn steer-btn" type="button" aria-label="Steer left">◀</button>
-        <button id="btn-steer-right" class="control-btn steer-btn" type="button" aria-label="Steer right">▶</button>
+        <div id="steer-pad" class="steer-pad" role="application" aria-label="Drag to steer or move">
+          <span class="steer-direction steer-up">▲</span>
+          <span class="steer-direction steer-left">◀</span>
+          <span class="steer-direction steer-right">▶</span>
+          <span class="steer-direction steer-down">▼</span>
+          <div id="steer-knob" class="steer-knob"></div>
+        </div>
       </div>
 
-      <!-- Pedals / Actions on right -->
+      <!-- Brake/reverse and acceleration/run -->
       <div class="pedal-cluster">
         <button id="btn-brake" class="control-btn pedal-btn brake-btn" type="button" aria-label="Brake or walk backward">BRAKE</button>
         <button id="btn-gas" class="control-btn pedal-btn gas-btn" type="button" aria-label="Accelerate or walk forward">GAS</button>

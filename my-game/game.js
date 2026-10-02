@@ -51,6 +51,9 @@ const input = {
   right: false
 };
 const keyboardInput = { gas: false, brake: false, left: false, right: false };
+const stickInput = { x: 0, y: 0, active: false };
+let cameraOrbitYaw = 0;
+let cameraOrbitPitch = 0;
 const pointerInputCounts = { gas: 0, brake: 0, left: 0, right: 0 };
 const activePointers = new Map();
 const inputKeys = Object.keys(input);
@@ -283,14 +286,8 @@ function createPlayerCharacter() {
 const playerVisual = createPlayerCharacter();
 playerGroup.add(playerVisual);
 
-// Ground plane fallback (infinite green horizon)
-const groundGeo = new THREE.PlaneGeometry(8000, 8000);
-const groundMat = new THREE.MeshStandardMaterial({ color: 0x225522, roughness: 0.95 });
-const ground = new THREE.Mesh(groundGeo, groundMat);
-ground.rotation.x = -Math.PI / 2;
-ground.position.y = -0.5;
-ground.receiveShadow = true;
-scene.add(ground);
+// No giant fallback ground plane: it covered the actual world with a flat green sheet.
+// If the track is unavailable, show the sky/fog rather than a misleading green void.
 
 // --- Track & Environment Loading ---
 const loader = new THREE.GLTFLoader();
@@ -527,6 +524,8 @@ function enforceWorldPerimeter(pos) {
 const btnToggle = document.getElementById('btn-toggle-vehicle');
 const modeVal = document.getElementById('mode-val');
 const speedoBox = document.getElementById('speedo-box');
+const gasButton = document.getElementById('btn-gas');
+const brakeButton = document.getElementById('btn-brake');
 
 function toggleMode() {
   releaseAllInputs();
@@ -552,6 +551,8 @@ function toggleMode() {
     }
     if (modeVal) modeVal.textContent = 'ON FOOT';
     if (speedoBox) speedoBox.style.opacity = '0.3';
+    if (gasButton) gasButton.textContent = 'RUN';
+    if (brakeButton) brakeButton.textContent = 'BACK';
   } else {
     // Check distance to car
     const distToCar = state.player.position.distanceTo(state.car.position);
@@ -566,6 +567,8 @@ function toggleMode() {
       }
       if (modeVal) modeVal.textContent = 'IN CAR';
       if (speedoBox) speedoBox.style.opacity = '1';
+      if (gasButton) gasButton.textContent = 'GAS';
+      if (brakeButton) brakeButton.textContent = 'BRAKE';
     }
   }
 }
@@ -611,8 +614,74 @@ function setupInput() {
 
   bindPointer('btn-gas', 'gas');
   bindPointer('btn-brake', 'brake');
-  bindPointer('btn-steer-left', 'left');
-  bindPointer('btn-steer-right', 'right');
+
+  // Analog left stick: car steering, or relative movement while on foot.
+  const stick = document.getElementById('steer-pad');
+  const knob = document.getElementById('steer-knob');
+  let stickPointerId = null;
+  const updateStick = (event) => {
+    if (!stick || event.pointerId !== stickPointerId) return;
+    const rect = stick.getBoundingClientRect();
+    const cx = rect.left + rect.width * 0.5;
+    const cy = rect.top + rect.height * 0.5;
+    let dx = event.clientX - cx;
+    let dy = event.clientY - cy;
+    const radius = rect.width * 0.34;
+    const length = Math.hypot(dx, dy);
+    if (length > radius) { dx *= radius / length; dy *= radius / length; }
+    stickInput.x = Math.max(-1, Math.min(1, dx / radius));
+    stickInput.y = Math.max(-1, Math.min(1, dy / radius));
+    stickInput.active = Math.hypot(stickInput.x, stickInput.y) > 0.12;
+    if (knob) knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    stick.classList.toggle('active', stickInput.active);
+  };
+  const releaseStick = (event) => {
+    if (event.pointerId !== stickPointerId) return;
+    stickPointerId = null;
+    stickInput.x = 0; stickInput.y = 0; stickInput.active = false;
+    if (knob) knob.style.transform = 'translate(0px, 0px)';
+    if (stick) stick.classList.remove('active');
+  };
+  if (stick) {
+    stick.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      event.preventDefault();
+      stickPointerId = event.pointerId;
+      stick.setPointerCapture?.(event.pointerId);
+      updateStick(event);
+    });
+    stick.addEventListener('pointermove', updateStick);
+    stick.addEventListener('pointerup', releaseStick);
+    stick.addEventListener('pointercancel', releaseStick);
+    stick.addEventListener('lostpointercapture', releaseStick);
+  }
+
+  // Drag anywhere on the unobstructed game view to orbit the chase camera.
+  let lookPointerId = null;
+  let lastLookX = 0;
+  let lastLookY = 0;
+  canvas.addEventListener('pointerdown', (event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    if (lookPointerId !== null) return;
+    event.preventDefault();
+    lookPointerId = event.pointerId;
+    lastLookX = event.clientX;
+    lastLookY = event.clientY;
+    canvas.setPointerCapture?.(event.pointerId);
+  });
+  canvas.addEventListener('pointermove', (event) => {
+    if (event.pointerId !== lookPointerId) return;
+    const dx = event.clientX - lastLookX;
+    const dy = event.clientY - lastLookY;
+    lastLookX = event.clientX;
+    lastLookY = event.clientY;
+    cameraOrbitYaw -= dx * 0.005;
+    cameraOrbitPitch = THREE.MathUtils.clamp(cameraOrbitPitch + dy * 0.004, -0.16, 0.58);
+  });
+  const releaseLook = (event) => { if (event.pointerId === lookPointerId) lookPointerId = null; };
+  canvas.addEventListener('pointerup', releaseLook);
+  canvas.addEventListener('pointercancel', releaseLook);
+  canvas.addEventListener('lostpointercapture', releaseLook);
 
   window.addEventListener('keydown', (e) => {
     const key = e.key.toLowerCase();
@@ -712,16 +781,14 @@ function animate(now) {
     }
 
     // Steering
-    const steerInput = Number(input.left) - Number(input.right);
-    if (steerInput !== 0) {
-      state.car.steerAngle = THREE.MathUtils.clamp(state.car.steerAngle + steerInput * 3.0 * dt, -1, 1);
-    } else {
-      state.car.steerAngle *= Math.pow(0.8, dt * 60);
-    }
+    const steerInput = stickInput.active ? stickInput.x : Number(input.left) - Number(input.right);
+    const steerBlend = 1 - Math.exp(-7 * dt);
+    state.car.steerAngle = THREE.MathUtils.lerp(state.car.steerAngle, steerInput, steerBlend);
 
-    const speedFactor = Math.min(Math.abs(state.car.speed) / 50, 1);
+    // Integrate yaw by delta time: predictable steering on both slow and fast phones.
+    const speedFactor = Math.min(Math.abs(state.car.speed) / 55, 1);
     const turnDirection = state.car.speed >= 0 ? 1 : -1;
-    state.car.heading += state.car.steerAngle * state.car.steerMax * speedFactor * turnDirection;
+    state.car.heading += state.car.steerAngle * 1.15 * speedFactor * turnDirection * dt;
 
     // Proposed forward motion
     const forwardX = -Math.sin(state.car.heading);
@@ -759,46 +826,49 @@ function animate(now) {
       carGroup.rotation.z = THREE.MathUtils.lerp(carGroup.rotation.z, 0, 0.1);
     }
 
-    // Camera chase car
+    // Smooth chase camera with touch-drag orbit.
     const camDistance = 8.5;
-    const camHeight = 3.2;
-    const targetCamX = state.car.position.x + Math.sin(state.car.heading) * camDistance;
-    const targetCamZ = state.car.position.z + Math.cos(state.car.heading) * camDistance;
-    const targetCamY = state.car.position.y + camHeight;
-
-    _scratchCamTarget.set(targetCamX, targetCamY, targetCamZ);
-    camera.position.lerp(_scratchCamTarget, 0.15);
-    camera.lookAt(state.car.position.x, state.car.position.y + 1.2, state.car.position.z);
+    const camPitch = 0.22 + cameraOrbitPitch;
+    const camHeading = state.car.heading + cameraOrbitYaw;
+    const horizontalDistance = Math.cos(camPitch) * camDistance;
+    const focusY = state.car.position.y + 1.2;
+    _scratchCamTarget.set(
+      state.car.position.x + Math.sin(camHeading) * horizontalDistance,
+      focusY + Math.sin(camPitch) * camDistance,
+      state.car.position.z + Math.cos(camHeading) * horizontalDistance
+    );
+    camera.position.lerp(_scratchCamTarget, 1 - Math.exp(-8 * dt));
+    camera.lookAt(state.car.position.x, focusY, state.car.position.z);
 
   } else {
     // --- ON-FOOT PLAYER PHYSICS ---
-    if (input.left) state.player.heading += 3.2 * dt;
-    if (input.right) state.player.heading -= 3.2 * dt;
-
-    let moveDir = 0;
-    if (input.gas) moveDir = 1;
-    else if (input.brake) moveDir = -0.5;
-
-    state.player.speed = moveDir * state.player.walkSpeed;
+    const footX = stickInput.active ? stickInput.x : Number(input.right) - Number(input.left);
+    const footY = stickInput.active ? -stickInput.y : Number(input.gas) - Number(input.brake) * 0.5;
+    const footMagnitude = Math.min(1, Math.hypot(footX, footY));
+    const moveDir = footMagnitude > 0.12 ? 1 : 0;
+    state.player.speed = moveDir * state.player.walkSpeed * footMagnitude;
 
     if (moveDir !== 0) {
-      state.player.walkCycle += dt * 10;
-      // Animate limbs
+      state.player.walkCycle += dt * (8 + footMagnitude * 4);
       const swing = Math.sin(state.player.walkCycle) * 0.6;
       if (leftArmMesh) leftArmMesh.rotation.x = swing;
       if (rightArmMesh) rightArmMesh.rotation.x = -swing;
       if (leftLegMesh) leftLegMesh.rotation.x = -swing;
       if (rightLegMesh) rightLegMesh.rotation.x = swing;
 
-      const forwardX = -Math.sin(state.player.heading);
-      const forwardZ = -Math.cos(state.player.heading);
-      _scratchVec1.set(forwardX, 0, forwardZ).normalize();
+      // Move relative to the current camera orbit, allowing forward/back and strafe.
+      const viewHeading = state.player.heading + cameraOrbitYaw;
+      const fwdX = -Math.sin(viewHeading), fwdZ = -Math.cos(viewHeading);
+      const rightX = Math.cos(viewHeading), rightZ = -Math.sin(viewHeading);
+      const moveX = rightX * footX - fwdX * footY;
+      const moveZ = rightZ * footX - fwdZ * footY;
+      _scratchVec1.set(moveX, 0, moveZ).normalize();
       const pMove = _scratchVec1;
-
       const pBarrier = checkBarrierCollision(state.player.position, pMove, 1.0);
       if (!pBarrier) {
-        state.player.position.x += forwardX * state.player.speed * dt;
-        state.player.position.z += forwardZ * state.player.speed * dt;
+        state.player.position.x += moveX * state.player.speed * dt;
+        state.player.position.z += moveZ * state.player.speed * dt;
+        state.player.heading = Math.atan2(-moveX, -moveZ);
       }
     } else {
       // Idle pose
@@ -826,16 +896,19 @@ function animate(now) {
       }
     }
 
-    // Camera chase player
+    // Close third-person chase camera with the same drag-to-look orbit as driving.
     const pCamDist = 4.2;
-    const pCamHeight = 2.2;
-    const targetCamX = state.player.position.x + Math.sin(state.player.heading) * pCamDist;
-    const targetCamZ = state.player.position.z + Math.cos(state.player.heading) * pCamDist;
-    const targetCamY = state.player.position.y + pCamHeight;
-
-    _scratchCamTarget.set(targetCamX, targetCamY, targetCamZ);
-    camera.position.lerp(_scratchCamTarget, 0.18);
-    camera.lookAt(state.player.position.x, state.player.position.y + 1.2, state.player.position.z);
+    const pCamPitch = 0.24 + cameraOrbitPitch;
+    const pCamHeading = state.player.heading + cameraOrbitYaw;
+    const pHorizontalDistance = Math.cos(pCamPitch) * pCamDist;
+    const pFocusY = state.player.position.y + 1.2;
+    _scratchCamTarget.set(
+      state.player.position.x + Math.sin(pCamHeading) * pHorizontalDistance,
+      pFocusY + Math.sin(pCamPitch) * pCamDist,
+      state.player.position.z + Math.cos(pCamHeading) * pHorizontalDistance
+    );
+    camera.position.lerp(_scratchCamTarget, 1 - Math.exp(-9 * dt));
+    camera.lookAt(state.player.position.x, pFocusY, state.player.position.z);
   }
 
   // Update light to follow active actor

@@ -552,3 +552,35 @@ button {
     transition-duration: .01ms !important;
   }
 }
+
+/* Analog input pad inspired by familiar mobile racing controls. */
+.steer-cluster { width: clamp(112px, 28vw, 150px); height: clamp(112px, 28vw, 150px); }
+.steer-pad {
+  position: relative;
+  width: 100%; height: 100%;
+  border: 2px solid rgba(226, 239, 255, .72);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(108, 142, 174, .22) 0 48%, rgba(8, 22, 38, .46) 50% 100%);
+  box-shadow: inset 0 0 0 7px rgba(220, 235, 255, .12), 0 5px 16px rgba(6, 14, 16, .25);
+  touch-action: none; pointer-events: auto; user-select: none; -webkit-user-select: none;
+}
+.steer-pad.active { border-color: rgba(140, 202, 255, .95); background-color: rgba(31, 105, 173, .18); }
+.steer-knob {
+  position: absolute; left: 50%; top: 50%; width: 40%; height: 40%;
+  border: 1px solid rgba(235, 245, 255, .8); border-radius: 50%;
+  background: rgba(187, 208, 232, .48); box-shadow: 0 3px 12px rgba(0,0,0,.3);
+  transform: translate(0,0); margin-left: -20%; margin-top: -20%; pointer-events: none;
+}
+.steer-direction { position: absolute; color: rgba(231, 239, 250, .68); font-size: 13px; line-height: 1; pointer-events: none; }
+.steer-up { top: 8%; left: 50%; transform: translateX(-50%); }
+.steer-down { bottom: 8%; left: 50%; transform: translateX(-50%); }
+.steer-left { left: 8%; top: 50%; transform: translateY(-50%); }
+.steer-right { right: 8%; top: 50%; transform: translateY(-50%); }
+#look-hint {
+  position: absolute; z-index: 3; left: 50%; bottom: calc(var(--safe-bottom) + 22px);
+  transform: translateX(-50%); padding: 5px 10px; border-radius: 999px;
+  color: rgba(238,244,250,.68); background: rgba(5,12,22,.28);
+  font-size: 10px; font-weight: 700; letter-spacing: .12em; pointer-events: none;
+}
+
+@media (max-height: 520px) { .steer-cluster { width: clamp(96px, 22vh, 126px); height: clamp(96px, 22vh, 126px); } }

@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#182c2d">
   <title>Spa Racing</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -41,20 +42,20 @@
     </div>
 
     <!-- Toggle Car/Foot Button -->
-    <button id="btn-toggle-vehicle" class="action-btn">EXIT CAR</button>
+    <button id="btn-toggle-vehicle" class="action-btn" type="button" aria-label="Exit or enter car">EXIT CAR</button>
 
     <!-- Mobile Touch Controls -->
-    <div id="touch-controls">
+    <div id="touch-controls" aria-label="Touch driving controls">
       <!-- Steering / Movement buttons on left -->
       <div class="steer-cluster">
-        <button id="btn-steer-left" class="control-btn steer-btn">◀</button>
-        <button id="btn-steer-right" class="control-btn steer-btn">▶</button>
+        <button id="btn-steer-left" class="control-btn steer-btn" type="button" aria-label="Steer left">◀</button>
+        <button id="btn-steer-right" class="control-btn steer-btn" type="button" aria-label="Steer right">▶</button>
       </div>
 
       <!-- Pedals / Actions on right -->
       <div class="pedal-cluster">
-        <button id="btn-brake" class="control-btn pedal-btn brake-btn">BRAKE</button>
-        <button id="btn-gas" class="control-btn pedal-btn gas-btn">GAS</button>
+        <button id="btn-brake" class="control-btn pedal-btn brake-btn" type="button" aria-label="Brake or walk backward">BRAKE</button>
+        <button id="btn-gas" class="control-btn pedal-btn gas-btn" type="button" aria-label="Accelerate or walk forward">GAS</button>
       </div>
     </div>
 

@@ -390,7 +390,9 @@ tryLoadTrack(0);
 // --- Optimized Surface Raycasting & Collision Physics ---
 const downRay = new THREE.Raycaster();
 const downDir = new THREE.Vector3(0, -1, 0);
+const downRayHits = [];
 const horizRay = new THREE.Raycaster();
+const horizRayHits = [];
 const nearbyColliders = [];
 const candidateBox = new THREE.Box3();
 
@@ -482,9 +484,10 @@ function snapToSurface(pos, heightOffset = 0.5) {
   downRay.set(rayOrigin, downDir);
   downRay.far = 100;
 
-  const hits = downRay.intersectObjects(pool, false);
-  if (hits.length > 0) {
-    const hit = hits[0];
+  downRayHits.length = 0;
+  downRay.intersectObjects(pool, false, downRayHits);
+  if (downRayHits.length > 0) {
+    const hit = downRayHits[0];
     pos.y = hit.point.y + heightOffset;
     return hit;
   }
@@ -501,9 +504,10 @@ function checkBarrierCollision(origin, moveDir, dist = 1.8) {
   horizRay.set(_scratchRayOrigin, moveDir);
   horizRay.far = dist;
 
-  const hits = horizRay.intersectObjects(pool, false);
-  if (hits.length > 0) {
-    const hit = hits[0];
+  horizRayHits.length = 0;
+  horizRay.intersectObjects(pool, false, horizRayHits);
+  if (horizRayHits.length > 0) {
+    const hit = horizRayHits[0];
     if (hit.face && Math.abs(hit.face.normal.y) < 0.45) {
       return hit;
     }

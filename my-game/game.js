@@ -87,9 +87,9 @@ const container = document.getElementById('game-container');
 const canvas = document.getElementById('game-canvas');
 const hasCoarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
 const isMobileDevice = hasCoarsePointer || 'ontouchstart' in window;
-const maxDevicePixelRatio = isMobileDevice ? 1 : 1.25;
-const minMobileRenderScale = 0.5;
-let renderScale = isMobileDevice ? 0.8 : 1;
+const maxDevicePixelRatio = isMobileDevice ? 1.25 : 1.5;
+const minMobileRenderScale = 0.7;
+let renderScale = isMobileDevice ? 0.9 : 1;
 let lastQualityCheck = performance.now();
 let stableFrameTimeSince = 0;
 
@@ -139,7 +139,7 @@ function adaptMobileRenderScale(now) {
 
   // Frame interval is a CPU+GPU frame-time signal (not a GPU timer query).
   // Reduce resolution quickly when sustained frame time misses mobile budgets.
-  const scaleStep = curFrameMs > 33 ? 0.1 : curFrameMs > 22 ? 0.05 : 0;
+  const scaleStep = curFrameMs > 40 ? 0.1 : curFrameMs > 28 ? 0.05 : 0;
   if (scaleStep > 0 && renderScale > minMobileRenderScale) {
     renderScale = Math.max(minMobileRenderScale, renderScale - scaleStep);
     stableFrameTimeSince = 0;
@@ -148,10 +148,10 @@ function adaptMobileRenderScale(now) {
   }
 
   // Recover slowly to avoid visible quality oscillation. HTML HUD stays native-resolution.
-  if (curFrameMs < 18 && renderScale < 1) {
+  if (curFrameMs < 20 && renderScale < 1) {
     if (stableFrameTimeSince === 0) stableFrameTimeSince = now;
-    if (now - stableFrameTimeSince >= 10000) {
-      renderScale = Math.min(1, renderScale + 0.025);
+    if (now - stableFrameTimeSince >= 5000) {
+      renderScale = Math.min(1, renderScale + 0.05);
       stableFrameTimeSince = now;
       applyRenderScale();
     }

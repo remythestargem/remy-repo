@@ -39,7 +39,7 @@ jobs:
             --simplify-ratio 0.15 \
             --simplify-error 0.0002 \
             --texture-compress webp \
-            --texture-size 1024 \
+            --texture-size 2048 \
             --compress quantize \
             --join false \
             --instance false \

@@ -303,8 +303,12 @@ const loader = new THREE.GLTFLoader();
 const trackColliders = [];
 const colliderGrid = new Map();
 const unindexedColliders = [];
+const barrierGrid = new Map();
+const unindexedBarriers = [];
+const nearbyBarriers = [];
 const colliderGridCellSize = 64;
 let colliderQuerySequence = 0;
+let barrierQuerySequence = 0;
 let trackLoaded = false;
 
 const trackPaths = [
@@ -339,6 +343,8 @@ function tryLoadTrack(index = 0) {
 
           const mat = child.material;
           const mats = Array.isArray(mat) ? mat : [mat];
+          const labels = `${child.name || ''} ${mats.map((m) => m?.name || '').join(' ')}`.toLowerCase();
+          const isBarrier = /guard.?rail|barrier|fence|wall|building|boulder|rock|trunk|curb|kerb/.test(labels);
           let isFoliageOrObstacle = false;
 
           // Mobile-grade materials: replace costly PBR (MeshStandardMaterial) with
@@ -370,8 +376,10 @@ function tryLoadTrack(index = 0) {
           });
           child.material = Array.isArray(mat) ? converted : converted[0];
 
-          // Only road, terrain, grass, curbs, and asphalt should be ground colliders
-          if (!isFoliageOrObstacle) {
+          // Keep horizontal obstacles separate from ground surfaces. Vehicle collision
+          // must never triangle-raycast the full high-poly track every moving frame.
+          if (isBarrier && child.userData.worldBox) addBarrierToGrid(child);
+          if (!isBarrier && !isFoliageOrObstacle) {
             trackColliders.push(child);
             addColliderToGrid(child);
           }
@@ -448,6 +456,52 @@ function addColliderToGrid(mesh) {
   }
 }
 
+function addBarrierToGrid(mesh) {
+  const box = mesh.userData.worldBox;
+  if (!box) { unindexedBarriers.push(mesh); return; }
+  const minX = Math.floor(box.min.x / colliderGridCellSize);
+  const maxX = Math.floor(box.max.x / colliderGridCellSize);
+  const minZ = Math.floor(box.min.z / colliderGridCellSize);
+  const maxZ = Math.floor(box.max.z / colliderGridCellSize);
+  const cells = (maxX - minX + 1) * (maxZ - minZ + 1);
+  if (!Number.isFinite(cells) || cells > 64) { unindexedBarriers.push(mesh); return; }
+  for (let x = minX; x <= maxX; x++) {
+    let row = barrierGrid.get(x);
+    if (!row) { row = new Map(); barrierGrid.set(x, row); }
+    for (let z = minZ; z <= maxZ; z++) {
+      let cell = row.get(z);
+      if (!cell) { cell = []; row.set(z, cell); }
+      cell.push(mesh);
+    }
+  }
+}
+
+function getNearbyBarriers(pos, radius) {
+  nearbyBarriers.length = 0;
+  candidateBox.min.set(pos.x - radius, pos.y - 3, pos.z - radius);
+  candidateBox.max.set(pos.x + radius, pos.y + 3, pos.z + radius);
+  const queryId = ++barrierQuerySequence;
+  const add = (mesh) => {
+    if (mesh.userData.barrierQuery === queryId) return;
+    mesh.userData.barrierQuery = queryId;
+    if (candidateBox.intersectsBox(mesh.userData.worldBox)) nearbyBarriers.push(mesh);
+  };
+  for (let i = 0; i < unindexedBarriers.length; i++) add(unindexedBarriers[i]);
+  const minX = Math.floor(candidateBox.min.x / colliderGridCellSize);
+  const maxX = Math.floor(candidateBox.max.x / colliderGridCellSize);
+  const minZ = Math.floor(candidateBox.min.z / colliderGridCellSize);
+  const maxZ = Math.floor(candidateBox.max.z / colliderGridCellSize);
+  for (let x = minX; x <= maxX; x++) {
+    const row = barrierGrid.get(x);
+    if (!row) continue;
+    for (let z = minZ; z <= maxZ; z++) {
+      const cell = row.get(z);
+      if (cell) for (let i = 0; i < cell.length; i++) add(cell[i]);
+    }
+  }
+  return nearbyBarriers;
+}
+
 function addNearbyCollider(mesh, queryId) {
   if (mesh.userData.lastColliderQuery === queryId) return;
   mesh.userData.lastColliderQuery = queryId;
@@ -458,8 +512,8 @@ function addNearbyCollider(mesh, queryId) {
 
 function getNearbyColliders(pos, radius = 40) {
   nearbyColliders.length = 0;
-  candidateBox.min.set(pos.x - radius, pos.y - 70, pos.z - radius);
-  candidateBox.max.set(pos.x + radius, pos.y + 70, pos.z + radius);
+  candidateBox.min.set(pos.x - radius, pos.y - 15, pos.z - radius);
+  candidateBox.max.set(pos.x + radius, pos.y + 15, pos.z + radius);
 
   const queryId = ++colliderQuerySequence;
   for (let i = 0; i < unindexedColliders.length; i++) {
@@ -485,7 +539,7 @@ function getNearbyColliders(pos, radius = 40) {
 function snapToSurface(pos, heightOffset = 0.5) {
   if (trackColliders.length === 0) return null;
   
-  const pool = getNearbyColliders(pos, 45);
+  const pool = getNearbyColliders(pos, 3);
   if (pool.length === 0) return null;
 
   _scratchRayOrigin.set(pos.x, pos.y + 35, pos.z);
@@ -505,23 +559,21 @@ function snapToSurface(pos, heightOffset = 0.5) {
 }
 
 function checkBarrierCollision(origin, moveDir, dist = 1.8) {
-  if (trackColliders.length === 0) return false;
-
-  const pool = getNearbyColliders(origin, Math.max(dist + 5, 20));
+  const pool = getNearbyBarriers(origin, dist + 1.2);
   if (pool.length === 0) return false;
-
-  _scratchRayOrigin.set(origin.x, origin.y + 0.6, origin.z);
-  horizRay.set(_scratchRayOrigin, moveDir);
-  horizRay.far = dist;
-
-  horizRayHits.length = 0;
-  horizRay.intersectObjects(pool, false, horizRayHits);
-  const hits = horizRayHits;
-  if (hits.length > 0) {
-    const hit = hits[0];
-    if (hit.face && Math.abs(hit.face.normal.y) < 0.45) {
-      return hit;
-    }
+  const endX = origin.x + moveDir.x * dist;
+  const endZ = origin.z + moveDir.z * dist;
+  const sweptMinX = Math.min(origin.x, endX) - 0.9;
+  const sweptMaxX = Math.max(origin.x, endX) + 0.9;
+  const sweptMinZ = Math.min(origin.z, endZ) - 0.9;
+  const sweptMaxZ = Math.max(origin.z, endZ) + 0.9;
+  const actorBottom = origin.y - 0.2;
+  const actorTop = origin.y + 1.8;
+  for (let i = 0; i < pool.length; i++) {
+    const box = pool[i].userData.worldBox;
+    if (box.max.y < actorBottom || box.min.y > actorTop) continue;
+    if (box.max.x >= sweptMinX && box.min.x <= sweptMaxX
+      && box.max.z >= sweptMinZ && box.min.z <= sweptMaxZ) return pool[i];
   }
   return false;
 }

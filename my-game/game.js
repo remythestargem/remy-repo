@@ -31,12 +31,16 @@ const state = {
     steerMax: 0.035,
     heading: 0,
     position: new THREE.Vector3(0, 1.0, 0),
+    verticalVelocity: 0,
+    lastGroundPosition: new THREE.Vector3(0, 1.0, 0),
     normal: new THREE.Vector3(0, 1, 0),
     gear: 'N',
     isOnRoad: true
   },
   player: {
     position: new THREE.Vector3(2, 0, 0),
+    verticalVelocity: 0,
+    lastGroundPosition: new THREE.Vector3(2, 0, 0),
     heading: 0,
     speed: 0,
     walkSpeed: 9.0, // m/s (~32 km/h sprint)
@@ -54,6 +58,7 @@ const input = {
 const keyboardInput = { gas: false, brake: false, left: false, right: false };
 const stickInput = { x: 0, y: 0, active: false };
 let cameraOrbitYaw = 0;
+let modeTransition = null;
 let cameraOrbitPitch = 0;
 const pointerInputCounts = { gas: 0, brake: 0, left: 0, right: 0 };
 const activePointers = new Map();
@@ -389,7 +394,8 @@ function tryLoadTrack(index = 0) {
       trackLoaded = true;
 
       // Find initial ground height for car
-      snapToSurface(state.car.position, 1.0);
+      snapToSurface(state.car.position, 0.45);
+      state.car.lastGroundPosition.copy(state.car.position);
 
       const overlay = document.getElementById('loading-overlay');
       if (overlay) overlay.style.opacity = '0';
@@ -536,26 +542,48 @@ function getNearbyColliders(pos, radius = 40) {
   return nearbyColliders;
 }
 
-function snapToSurface(pos, heightOffset = 0.5) {
+function raycastSurface(pos) {
   if (trackColliders.length === 0) return null;
-  
   const pool = getNearbyColliders(pos, 3);
   if (pool.length === 0) return null;
-
   _scratchRayOrigin.set(pos.x, pos.y + 35, pos.z);
-  const rayOrigin = _scratchRayOrigin;
-  downRay.set(rayOrigin, downDir);
+  downRay.set(_scratchRayOrigin, downDir);
   downRay.far = 100;
-
   downRayHits.length = 0;
   downRay.intersectObjects(pool, false, downRayHits);
-  const hits = downRayHits;
-  if (hits.length > 0) {
-    const hit = hits[0];
-    pos.y = hit.point.y + heightOffset;
-    return hit;
+  return downRayHits.length ? downRayHits[0] : null;
+}
+
+function snapToSurface(pos, heightOffset = 0.5) {
+  const hit = raycastSurface(pos);
+  if (hit) pos.y = hit.point.y + heightOffset;
+  return hit;
+}
+
+// Follow the irregular track surface, applying gravity while airborne and landing
+// cleanly rather than teleporting vertically to every newly sampled triangle.
+function settleActorOnSurface(pos, actor, heightOffset, dt) {
+  const hit = raycastSurface(pos);
+  if (!hit) {
+    actor.verticalVelocity -= 24 * dt;
+    pos.y += actor.verticalVelocity * dt;
+    if (pos.y < actor.lastGroundPosition.y - 12) {
+      pos.copy(actor.lastGroundPosition);
+      actor.verticalVelocity = 0;
+      actor.speed = 0;
+    }
+    return null;
   }
-  return null;
+  const groundY = hit.point.y + heightOffset;
+  if (pos.y > groundY + 0.08) {
+    actor.verticalVelocity -= 24 * dt;
+    pos.y = Math.max(groundY, pos.y + actor.verticalVelocity * dt);
+  } else {
+    pos.y = groundY;
+    actor.verticalVelocity = 0;
+  }
+  if (pos.y <= groundY + 0.001) actor.lastGroundPosition.set(pos.x, pos.y, pos.z);
+  return hit;
 }
 
 function checkBarrierCollision(origin, moveDir, dist = 1.8) {
@@ -595,49 +623,86 @@ const gasButton = document.getElementById('btn-gas');
 const brakeButton = document.getElementById('btn-brake');
 
 function toggleMode() {
+  if (modeTransition) return;
   releaseAllInputs();
   if (state.mode === 'car') {
-    // Exit Car -> switch to on-foot
-    state.mode = 'foot';
+    // Exit beside the driver's door with a short, visible step-out transition.
     state.car.speed = 0;
-
-    // Spawn player to the left of the car
-    const sideX = Math.cos(state.car.heading) * 2.2;
-    const sideZ = -Math.sin(state.car.heading) * 2.2;
-    state.player.position.set(state.car.position.x + sideX, state.car.position.y, state.car.position.z + sideZ);
+    const sideX = Math.cos(state.car.heading) * 2.25;
+    const sideZ = -Math.sin(state.car.heading) * 2.25;
+    const start = state.car.position.clone();
+    const target = new THREE.Vector3(state.car.position.x + sideX, state.car.position.y, state.car.position.z + sideZ);
+    snapToSurface(target, 0.0);
+    state.player.position.copy(start);
     state.player.heading = state.car.heading;
-    snapToSurface(state.player.position, 0.0);
-
-    playerGroup.position.copy(state.player.position);
+    state.player.verticalVelocity = 0;
+    playerGroup.position.copy(start);
     playerGroup.rotation.y = state.player.heading;
+    playerGroup.scale.setScalar(0.16);
     playerGroup.visible = true;
-
-    if (btnToggle) {
-      btnToggle.textContent = 'ENTER CAR';
-      btnToggle.style.background = 'rgba(34, 197, 94, 0.85)';
-    }
-    if (modeVal) modeVal.textContent = 'ON FOOT';
+    state.mode = 'foot';
+    modeTransition = { kind: 'exit', elapsed: 0, duration: 0.62, from: start, to: target };
+    if (btnToggle) { btnToggle.textContent = 'EXITING...'; btnToggle.style.background = 'rgba(220, 38, 38, 0.85)'; }
+    if (modeVal) modeVal.textContent = 'EXITING';
     if (speedoBox) speedoBox.style.opacity = '0.3';
     if (gasButton) gasButton.textContent = 'RUN';
     if (brakeButton) brakeButton.textContent = 'BACK';
   } else {
-    // Check distance to car
     const distToCar = state.player.position.distanceTo(state.car.position);
-    if (distToCar <= 6.0) {
-      // Enter Car
-      state.mode = 'car';
-      playerGroup.visible = false;
-
-      if (btnToggle) {
-        btnToggle.textContent = 'EXIT CAR';
-        btnToggle.style.background = 'rgba(220, 38, 38, 0.85)';
-      }
-      if (modeVal) modeVal.textContent = 'IN CAR';
-      if (speedoBox) speedoBox.style.opacity = '1';
-      if (gasButton) gasButton.textContent = 'GAS';
-      if (brakeButton) brakeButton.textContent = 'BRAKE';
-    }
+    if (distToCar > 6.0) return;
+    // Walk to the driver's door before disappearing into the cabin.
+    const door = new THREE.Vector3(
+      state.car.position.x + Math.cos(state.car.heading) * 1.8,
+      state.car.position.y,
+      state.car.position.z - Math.sin(state.car.heading) * 1.8
+    );
+    snapToSurface(door, 0.0);
+    modeTransition = { kind: 'enter', elapsed: 0, duration: 0.62, from: state.player.position.clone(), to: door };
+    if (btnToggle) btnToggle.textContent = 'ENTERING...';
+    if (modeVal) modeVal.textContent = 'ENTERING';
   }
+}
+
+function updateModeTransition(dt) {
+  if (!modeTransition) return;
+  const tr = modeTransition;
+  tr.elapsed = Math.min(tr.duration, tr.elapsed + dt);
+  const linear = tr.elapsed / tr.duration;
+  const t = linear * linear * (3 - 2 * linear);
+  playerGroup.position.lerpVectors(tr.from, tr.to, t);
+  state.player.position.copy(playerGroup.position);
+  if (tr.kind === 'exit') {
+    playerGroup.scale.setScalar(0.16 + 0.84 * t);
+    const step = Math.sin(linear * Math.PI * 2) * 0.42;
+    if (leftLegMesh) leftLegMesh.rotation.x = step;
+    if (rightLegMesh) rightLegMesh.rotation.x = -step;
+    if (leftArmMesh) leftArmMesh.rotation.x = -step * 0.65;
+    if (rightArmMesh) rightArmMesh.rotation.x = step * 0.65;
+  } else {
+    playerGroup.scale.setScalar(Math.max(0.04, 1 - t));
+    if (leftLegMesh) leftLegMesh.rotation.x = Math.sin(linear * Math.PI * 2) * 0.3;
+    if (rightLegMesh) rightLegMesh.rotation.x = -Math.sin(linear * Math.PI * 2) * 0.3;
+  }
+  if (linear < 1) return;
+  if (tr.kind === 'exit') {
+    state.player.position.copy(tr.to);
+    playerGroup.position.copy(tr.to);
+    playerGroup.scale.setScalar(1);
+    state.player.lastGroundPosition.copy(tr.to);
+    if (btnToggle) { btnToggle.textContent = 'ENTER CAR'; btnToggle.style.background = 'rgba(34, 197, 94, 0.85)'; }
+    if (modeVal) modeVal.textContent = 'ON FOOT';
+  } else {
+    state.mode = 'car';
+    playerGroup.visible = false;
+    playerGroup.scale.setScalar(1);
+    state.car.position.y = Math.max(state.car.position.y, state.player.position.y);
+    if (btnToggle) { btnToggle.textContent = 'EXIT CAR'; btnToggle.style.background = 'rgba(220, 38, 38, 0.85)'; }
+    if (modeVal) modeVal.textContent = 'IN CAR';
+    if (speedoBox) speedoBox.style.opacity = '1';
+    if (gasButton) gasButton.textContent = 'GAS';
+    if (brakeButton) brakeButton.textContent = 'BRAKE';
+  }
+  modeTransition = null;
 }
 
 if (btnToggle) {
@@ -830,7 +895,9 @@ function animate(now) {
   const dt = Math.min((now - lastTime) / 1000, 0.1);
   lastTime = now;
 
-  if (state.mode === 'car') {
+  updateModeTransition(dt);
+
+  if (!modeTransition && state.mode === 'car') {
     // --- CAR PHYSICS ---
     if (input.gas) {
       state.car.speed += state.car.accel * dt;
@@ -868,7 +935,7 @@ function animate(now) {
     const previousCarZ = state.car.position.z;
     const carTravel = Math.abs(metersPerSec * dt);
     const barrierHit = carTravel > 0.001
-      ? checkBarrierCollision(state.car.position, moveVec, carTravel + 2.0)
+      ? checkBarrierCollision(state.car.position, moveVec, carTravel + 0.35)
       : false;
 
     if (barrierHit) {
@@ -882,8 +949,18 @@ function animate(now) {
     // Ground raycasts are only needed when the car actually moved.
     const carMoved = Math.abs(state.car.position.x - previousCarX) > 0.0001
       || Math.abs(state.car.position.z - previousCarZ) > 0.0001;
-    const groundHit = carMoved ? snapToSurface(state.car.position, 0.45) : null;
-    enforceWorldPerimeter(state.car.position);
+    let groundHit = null;
+    if (carMoved) {
+      groundHit = settleActorOnSurface(state.car.position, state.car, 0.45, dt);
+      if (!groundHit) {
+        // The mesh's true outline is irregular. Do not drive off its last valid
+        // supported point just because the broad rectangular world bounds allow it.
+        state.car.position.copy(state.car.lastGroundPosition);
+        state.car.speed = 0;
+      } else {
+        enforceWorldPerimeter(state.car.position);
+      }
+    }
 
     carGroup.position.copy(state.car.position);
     carGroup.rotation.y = state.car.heading;
@@ -914,7 +991,7 @@ function animate(now) {
     camera.position.lerp(_scratchCamTarget, 1 - Math.exp(-15 * dt));
     camera.lookAt(state.car.position.x, focusY, state.car.position.z);
 
-  } else {
+  } else if (!modeTransition) {
     // --- ON-FOOT PLAYER PHYSICS ---
     const footX = stickInput.active ? stickInput.x : Number(input.right) - Number(input.left);
     const footY = stickInput.active ? -stickInput.y : Number(input.gas) - Number(input.brake) * 0.5;
@@ -955,8 +1032,15 @@ function animate(now) {
       if (rightLegMesh) rightLegMesh.rotation.x = 0;
     }
 
-    if (moveDir !== 0) snapToSurface(state.player.position, 0.0);
-    enforceWorldPerimeter(state.player.position);
+    if (moveDir !== 0) {
+      const groundHit = settleActorOnSurface(state.player.position, state.player, 0.0, dt);
+      if (!groundHit) {
+        state.player.position.copy(state.player.lastGroundPosition);
+        state.player.speed = 0;
+      } else {
+        enforceWorldPerimeter(state.player.position);
+      }
+    }
 
     playerGroup.position.copy(state.player.position);
     playerGroup.rotation.y = state.player.heading;

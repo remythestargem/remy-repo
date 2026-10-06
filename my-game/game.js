@@ -399,7 +399,9 @@ tryLoadTrack(0);
 // --- Optimized Surface Raycasting & Collision Physics ---
 const downRay = new THREE.Raycaster();
 const downDir = new THREE.Vector3(0, -1, 0);
+const downRayHits = [];
 const horizRay = new THREE.Raycaster();
+const horizRayHits = [];
 const nearbyColliders = [];
 const candidateBox = new THREE.Box3();
 
@@ -491,7 +493,9 @@ function snapToSurface(pos, heightOffset = 0.5) {
   downRay.set(rayOrigin, downDir);
   downRay.far = 100;
 
-  const hits = downRay.intersectObjects(pool, false);
+  downRayHits.length = 0;
+  downRay.intersectObjects(pool, false, downRayHits);
+  const hits = downRayHits;
   if (hits.length > 0) {
     const hit = hits[0];
     pos.y = hit.point.y + heightOffset;
@@ -510,7 +514,9 @@ function checkBarrierCollision(origin, moveDir, dist = 1.8) {
   horizRay.set(_scratchRayOrigin, moveDir);
   horizRay.far = dist;
 
-  const hits = horizRay.intersectObjects(pool, false);
+  horizRayHits.length = 0;
+  horizRay.intersectObjects(pool, false, horizRayHits);
+  const hits = horizRayHits;
   if (hits.length > 0) {
     const hit = hits[0];
     if (hit.face && Math.abs(hit.face.normal.y) < 0.45) {
@@ -791,7 +797,7 @@ function animate(now) {
 
     // Steering
     const steerInput = stickInput.active ? stickInput.x : Number(input.left) - Number(input.right);
-    const steerBlend = 1 - Math.exp(-7 * dt);
+    const steerBlend = 1 - Math.exp(-16 * dt);
     state.car.steerAngle = THREE.MathUtils.lerp(state.car.steerAngle, steerInput, steerBlend);
 
     // Integrate yaw by delta time: predictable steering on both slow and fast phones.
@@ -806,7 +812,12 @@ function animate(now) {
 
     _scratchVec1.set(forwardX, 0, forwardZ).normalize();
     const moveVec = _scratchVec1;
-    const barrierHit = checkBarrierCollision(state.car.position, moveVec, Math.abs(metersPerSec * dt) + 2.0);
+    const previousCarX = state.car.position.x;
+    const previousCarZ = state.car.position.z;
+    const carTravel = Math.abs(metersPerSec * dt);
+    const barrierHit = carTravel > 0.001
+      ? checkBarrierCollision(state.car.position, moveVec, carTravel + 2.0)
+      : false;
 
     if (barrierHit) {
       // Barrier collision: bounce off wall, lose speed
@@ -816,8 +827,10 @@ function animate(now) {
       state.car.position.z += forwardZ * metersPerSec * dt;
     }
 
-    // Snap to Spa track 3D elevation
-    const groundHit = snapToSurface(state.car.position, 0.45);
+    // Ground raycasts are only needed when the car actually moved.
+    const carMoved = Math.abs(state.car.position.x - previousCarX) > 0.0001
+      || Math.abs(state.car.position.z - previousCarZ) > 0.0001;
+    const groundHit = carMoved ? snapToSurface(state.car.position, 0.45) : null;
     enforceWorldPerimeter(state.car.position);
 
     carGroup.position.copy(state.car.position);
@@ -846,7 +859,7 @@ function animate(now) {
       focusY + Math.sin(camPitch) * camDistance,
       state.car.position.z + Math.cos(camHeading) * horizontalDistance
     );
-    camera.position.lerp(_scratchCamTarget, 1 - Math.exp(-8 * dt));
+    camera.position.lerp(_scratchCamTarget, 1 - Math.exp(-15 * dt));
     camera.lookAt(state.car.position.x, focusY, state.car.position.z);
 
   } else {
@@ -873,7 +886,10 @@ function animate(now) {
       const moveZ = rightZ * footX - fwdZ * footY;
       _scratchVec1.set(moveX, 0, moveZ).normalize();
       const pMove = _scratchVec1;
-      const pBarrier = checkBarrierCollision(state.player.position, pMove, 1.0);
+      const footTravel = state.player.speed * dt;
+      const pBarrier = footTravel > 0.001
+        ? checkBarrierCollision(state.player.position, pMove, footTravel + 0.8)
+        : false;
       if (!pBarrier) {
         state.player.position.x += moveX * state.player.speed * dt;
         state.player.position.z += moveZ * state.player.speed * dt;
@@ -887,7 +903,7 @@ function animate(now) {
       if (rightLegMesh) rightLegMesh.rotation.x = 0;
     }
 
-    snapToSurface(state.player.position, 0.0);
+    if (moveDir !== 0) snapToSurface(state.player.position, 0.0);
     enforceWorldPerimeter(state.player.position);
 
     playerGroup.position.copy(state.player.position);
@@ -916,7 +932,7 @@ function animate(now) {
       pFocusY + Math.sin(pCamPitch) * pCamDist,
       state.player.position.z + Math.cos(pCamHeading) * pHorizontalDistance
     );
-    camera.position.lerp(_scratchCamTarget, 1 - Math.exp(-9 * dt));
+    camera.position.lerp(_scratchCamTarget, 1 - Math.exp(-15 * dt));
     camera.lookAt(state.player.position.x, pFocusY, state.player.position.z);
   }
 

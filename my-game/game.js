@@ -13,6 +13,7 @@ let curFps = 60;
 let curFrameMs = 16.6;
 const fpsElem = document.getElementById('fps-counter');
 const frameTimeElem = document.getElementById('frametime-counter');
+const renderScaleElem = document.getElementById('render-scale-counter');
 // Spa Racing & Pursuit Engine - Three.js
 
 // Game State
@@ -87,8 +88,8 @@ const canvas = document.getElementById('game-canvas');
 const hasCoarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
 const isMobileDevice = hasCoarsePointer || 'ontouchstart' in window;
 const maxDevicePixelRatio = isMobileDevice ? 1 : 1.25;
-const minMobileRenderScale = 0.65;
-let renderScale = isMobileDevice ? 0.9 : 1;
+const minMobileRenderScale = 0.5;
+let renderScale = isMobileDevice ? 0.8 : 1;
 let lastQualityCheck = performance.now();
 let stableFrameTimeSince = 0;
 
@@ -118,31 +119,39 @@ try {
 }
 
 renderer.shadowMap.enabled = false;
+// Three.js sorts opaque objects front-to-back and transparent objects back-to-front.
+// Keep the single forward pass TBDR-friendly without a bandwidth-heavy depth pre-pass.
+renderer.sortObjects = true;
 
 function applyRenderScale() {
   const width = container.clientWidth || window.innerWidth;
   const height = container.clientHeight || window.innerHeight;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDevicePixelRatio) * renderScale);
   renderer.setSize(width, height, false);
+  if (renderScaleElem) renderScaleElem.textContent = `RES ${Math.round(renderScale * 100)}%`;
   camera.aspect = width / Math.max(height, 1);
   camera.updateProjectionMatrix();
 }
 
 function adaptMobileRenderScale(now) {
-  if (!isMobileDevice || now - lastQualityCheck < 2000) return;
+  if (!isMobileDevice || now - lastQualityCheck < 1000) return;
   lastQualityCheck = now;
 
-  if (curFrameMs > 24 && renderScale > minMobileRenderScale) {
-    renderScale = Math.max(minMobileRenderScale, renderScale - 0.1);
+  // Frame interval is a CPU+GPU frame-time signal (not a GPU timer query).
+  // Reduce resolution quickly when sustained frame time misses mobile budgets.
+  const scaleStep = curFrameMs > 33 ? 0.1 : curFrameMs > 22 ? 0.05 : 0;
+  if (scaleStep > 0 && renderScale > minMobileRenderScale) {
+    renderScale = Math.max(minMobileRenderScale, renderScale - scaleStep);
     stableFrameTimeSince = 0;
     applyRenderScale();
     return;
   }
 
-  if (curFrameMs < 16.5 && renderScale < 1) {
+  // Recover slowly to avoid visible quality oscillation. HTML HUD stays native-resolution.
+  if (curFrameMs < 18 && renderScale < 1) {
     if (stableFrameTimeSince === 0) stableFrameTimeSince = now;
-    if (now - stableFrameTimeSince >= 8000) {
-      renderScale = Math.min(1, renderScale + 0.05);
+    if (now - stableFrameTimeSince >= 10000) {
+      renderScale = Math.min(1, renderScale + 0.025);
       stableFrameTimeSince = now;
       applyRenderScale();
     }
@@ -174,7 +183,7 @@ function createCarMesh() {
 
   // Chassis
   const bodyGeo = new THREE.BoxGeometry(1.9, 0.55, 4.2);
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd91b1b, roughness: 0.25, metalness: 0.7 });
+  const bodyMat = new THREE.MeshLambertMaterial({ color: 0xd91b1b });
   const body = new THREE.Mesh(bodyGeo, bodyMat);
   body.position.y = 0.55;
   body.castShadow = true;
@@ -182,7 +191,7 @@ function createCarMesh() {
 
   // Cabin
   const cabinGeo = new THREE.BoxGeometry(1.5, 0.45, 2.0);
-  const cabinMat = new THREE.MeshStandardMaterial({ color: 0x111625, roughness: 0.1, metalness: 0.9 });
+  const cabinMat = new THREE.MeshLambertMaterial({ color: 0x111625 });
   const cabin = new THREE.Mesh(cabinGeo, cabinMat);
   cabin.position.set(0, 0.95, -0.2);
   cabin.castShadow = true;
@@ -191,7 +200,7 @@ function createCarMesh() {
   // Spoiler
   const spoilerWing = new THREE.Mesh(
     new THREE.BoxGeometry(1.8, 0.08, 0.4),
-    new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 })
+    new THREE.MeshLambertMaterial({ color: 0x111111 })
   );
   spoilerWing.position.set(0, 1.1, 1.9);
   spoilerWing.castShadow = true;
@@ -199,7 +208,7 @@ function createCarMesh() {
 
   // Wheels
   const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 16);
-  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
+  const wheelMat = new THREE.MeshLambertMaterial({ color: 0x222222 });
   const wheelPositions = [
     [-0.95, 0.38, 1.3],
     [0.95, 0.38, 1.3],
@@ -234,7 +243,7 @@ function createPlayerCharacter() {
   // Torso / Jacket
   const torso = new THREE.Mesh(
     new THREE.BoxGeometry(0.6, 0.8, 0.35),
-    new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.7 })
+    new THREE.MeshLambertMaterial({ color: 0x2563eb })
   );
   torso.position.y = 1.1;
   torso.castShadow = true;
@@ -243,7 +252,7 @@ function createPlayerCharacter() {
   // Head / Helmet
   const head = new THREE.Mesh(
     new THREE.SphereGeometry(0.22, 16, 16),
-    new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.3, metalness: 0.5 })
+    new THREE.MeshLambertMaterial({ color: 0x1f2937 })
   );
   head.position.y = 1.7;
   head.castShadow = true;
@@ -252,14 +261,14 @@ function createPlayerCharacter() {
   // Visor
   const visor = new THREE.Mesh(
     new THREE.BoxGeometry(0.28, 0.12, 0.15),
-    new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.1, metalness: 0.9 })
+    new THREE.MeshLambertMaterial({ color: 0xf59e0b })
   );
   visor.position.set(0, 1.7, -0.18);
   p.add(visor);
 
   // Limbs
   const armGeo = new THREE.BoxGeometry(0.18, 0.65, 0.18);
-  const armMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.6 });
+  const armMat = new THREE.MeshLambertMaterial({ color: 0x1d4ed8 });
   
   leftArmMesh = new THREE.Mesh(armGeo, armMat);
   leftArmMesh.position.set(-0.42, 1.05, 0);
@@ -270,7 +279,7 @@ function createPlayerCharacter() {
   p.add(rightArmMesh);
 
   const legGeo = new THREE.BoxGeometry(0.22, 0.75, 0.22);
-  const legMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.8 });
+  const legMat = new THREE.MeshLambertMaterial({ color: 0x111827 });
 
   leftLegMesh = new THREE.Mesh(legGeo, legMat);
   leftLegMesh.position.set(-0.18, 0.4, 0);
@@ -910,11 +919,6 @@ function animate(now) {
     camera.position.lerp(_scratchCamTarget, 1 - Math.exp(-9 * dt));
     camera.lookAt(state.player.position.x, pFocusY, state.player.position.z);
   }
-
-  // Update light to follow active actor
-  const activePos = state.mode === 'car' ? state.car.position : state.player.position;
-  sun.position.set(activePos.x + 100, activePos.y + 200, activePos.z + 80);
-  sun.target.position.copy(activePos);
 
   // Measure FPS & Frame Time
   frameCount++;

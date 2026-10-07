@@ -209,7 +209,7 @@ function loadCarModel() {
       const sourceMaterials = Array.isArray(original) ? original : [original];
       const optimizedMaterials = sourceMaterials.map((material) => {
         if (!material || (!material.isMeshStandardMaterial && !material.isMeshPhysicalMaterial)) return material;
-        return new THREE.MeshLambertMaterial({
+        return new THREE.MeshPhongMaterial({
           name: material.name,
           map: material.map || null,
           color: material.color ? material.color.clone() : new THREE.Color(0xffffff),
@@ -217,7 +217,9 @@ function loadCarModel() {
           vertexColors: material.vertexColors,
           transparent: material.transparent,
           alphaTest: material.alphaTest || 0,
-          depthWrite: material.depthWrite
+          depthWrite: material.depthWrite,
+          shininess: 32,
+          specular: new THREE.Color(0x383838)
         });
       });
       node.material = Array.isArray(original) ? optimizedMaterials : optimizedMaterials[0];
@@ -310,6 +312,7 @@ const colliderGridCellSize = 64;
 let colliderQuerySequence = 0;
 let barrierQuerySequence = 0;
 let trackLoaded = false;
+let trackWorldBounds = null;
 
 const trackPaths = [
   'assets/track/track.glb',
@@ -387,10 +390,17 @@ function tryLoadTrack(index = 0) {
       });
       scene.add(trackModel);
       trackLoaded = true;
+      trackModel.updateMatrixWorld(true);
+      trackWorldBounds = new THREE.Box3().setFromObject(trackModel);
 
-      // Find initial ground height for car
-      snapToSurface(state.car.position, 0.06);
+      // Find an actual drivable surface before enabling vehicle physics. The
+      // track asset's origin is not guaranteed to lie on the road surface.
+      const spawnHit = findInitialCarSpawn();
+      if (!spawnHit) {
+        console.error('No drivable track surface found for vehicle spawn');
+      }
       state.car.lastGroundPosition.copy(state.car.position);
+      carGroup.position.copy(state.car.position);
 
       const overlay = document.getElementById('loading-overlay');
       if (overlay) overlay.style.opacity = '0';
@@ -512,10 +522,10 @@ function addNearbyCollider(mesh, queryId) {
   }
 }
 
-function getNearbyColliders(pos, radius = 40) {
+function getNearbyColliders(pos, radius = 40, verticalRange = 15) {
   nearbyColliders.length = 0;
-  candidateBox.min.set(pos.x - radius, pos.y - 15, pos.z - radius);
-  candidateBox.max.set(pos.x + radius, pos.y + 15, pos.z + radius);
+  candidateBox.min.set(pos.x - radius, pos.y - verticalRange, pos.z - radius);
+  candidateBox.max.set(pos.x + radius, pos.y + verticalRange, pos.z + radius);
 
   const queryId = ++colliderQuerySequence;
   for (let i = 0; i < unindexedColliders.length; i++) {
@@ -556,6 +566,89 @@ function snapToSurface(pos, heightOffset = 0.5) {
   return hit;
 }
 
+function findInitialCarSpawn() {
+  const originX = state.car.position.x;
+  const originZ = state.car.position.z;
+  const bounds = trackWorldBounds;
+  const highY = bounds ? bounds.max.y + 10 : 1000;
+  const verticalRange = bounds
+    ? Math.max(100, bounds.max.y - bounds.min.y + 20)
+    : 2000;
+  const rayFar = verticalRange + 20;
+  const candidates = [{ x: originX, z: originZ }];
+
+  if (bounds) {
+    candidates.push({ x: bounds.getCenter(_scratchVec2).x, z: bounds.getCenter(_scratchVec2).z });
+    // Mesh centers often land on the road even when the exported scene origin
+    // is offset. Sort so the closest usable road point is preferred.
+    const meshCenters = [];
+    for (let i = 0; i < trackColliders.length; i++) {
+      const box = trackColliders[i].userData.worldBox;
+      if (!box) continue;
+      meshCenters.push({ x: (box.min.x + box.max.x) * 0.5, z: (box.min.z + box.max.z) * 0.5 });
+    }
+    meshCenters.sort((a, b) => (a.x - originX) ** 2 + (a.z - originZ) ** 2
+      - ((b.x - originX) ** 2 + (b.z - originZ) ** 2));
+    candidates.push(...meshCenters.slice(0, 48));
+  }
+
+  // If the exporter split the road into strips whose centers miss the actual
+  // road surface, sample a compact spiral around both likely world origins.
+  const anchors = bounds
+    ? [{ x: originX, z: originZ }, { x: (bounds.min.x + bounds.max.x) * 0.5, z: (bounds.min.z + bounds.max.z) * 0.5 }]
+    : [{ x: originX, z: originZ }];
+  for (const anchor of anchors) {
+    for (const radius of [12, 24, 48, 96, 192, 384]) {
+      for (let step = 0; step < 12; step++) {
+        const angle = (step / 12) * Math.PI * 2;
+        candidates.push({ x: anchor.x + Math.cos(angle) * radius, z: anchor.z + Math.sin(angle) * radius });
+      }
+    }
+  }
+
+  let bestHit = null;
+  let bestDistance = Infinity;
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i];
+    candidateBox.min.set(candidate.x - 3, bounds ? bounds.min.y - 10 : -1000, candidate.z - 3);
+    candidateBox.max.set(candidate.x + 3, bounds ? bounds.max.y + 10 : 1000, candidate.z + 3);
+    nearbyColliders.length = 0;
+    const queryId = ++colliderQuerySequence;
+    for (let j = 0; j < unindexedColliders.length; j++) addNearbyCollider(unindexedColliders[j], queryId);
+    const minCellX = Math.floor(candidateBox.min.x / colliderGridCellSize);
+    const maxCellX = Math.floor(candidateBox.max.x / colliderGridCellSize);
+    const minCellZ = Math.floor(candidateBox.min.z / colliderGridCellSize);
+    const maxCellZ = Math.floor(candidateBox.max.z / colliderGridCellSize);
+    for (let x = minCellX; x <= maxCellX; x++) {
+      for (let z = minCellZ; z <= maxCellZ; z++) {
+        const cell = getColliderCell(x, z);
+        if (cell) for (let j = 0; j < cell.length; j++) addNearbyCollider(cell[j], queryId);
+      }
+    }
+    if (!nearbyColliders.length) continue;
+    _scratchRayOrigin.set(candidate.x, highY, candidate.z);
+    downRay.set(_scratchRayOrigin, downDir);
+    downRay.near = 0;
+    downRay.far = rayFar;
+    downRayHits.length = 0;
+    downRay.intersectObjects(nearbyColliders, false, downRayHits);
+    if (!downRayHits.length) continue;
+    const hit = downRayHits[0];
+    const distance = (candidate.x - originX) ** 2 + (candidate.z - originZ) ** 2;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestHit = hit;
+    }
+  }
+
+  if (!bestHit) return null;
+  state.car.position.set(bestHit.point.x, bestHit.point.y + 0.06, bestHit.point.z);
+  state.car.verticalVelocity = 0;
+  state.car.unsupportedTime = 0;
+  console.info('Vehicle spawned on track surface', state.car.position.toArray());
+  return bestHit;
+}
+
 // Follow the irregular track surface, applying gravity while airborne and landing
 // cleanly rather than teleporting vertically to every newly sampled triangle.
 function settleActorOnSurface(pos, actor, heightOffset, dt) {
@@ -582,22 +675,50 @@ function settleActorOnSurface(pos, actor, heightOffset, dt) {
   return hit;
 }
 
+function segmentEntersExpandedBox2D(startX, startZ, endX, endZ, box, radius) {
+  const minX = box.min.x - radius;
+  const maxX = box.max.x + radius;
+  const minZ = box.min.z - radius;
+  const maxZ = box.max.z + radius;
+  // If an exported curb/rail box already contains the spawn point, let the
+  // vehicle leave it instead of pinning the car at zero speed.
+  if (startX >= minX && startX <= maxX && startZ >= minZ && startZ <= maxZ) return false;
+  let enter = 0;
+  let exit = 1;
+  const dx = endX - startX;
+  const dz = endZ - startZ;
+  if (Math.abs(dx) < 1e-7) {
+    if (startX < minX || startX > maxX) return false;
+  } else {
+    let a = (minX - startX) / dx;
+    let b = (maxX - startX) / dx;
+    if (a > b) [a, b] = [b, a];
+    enter = Math.max(enter, a);
+    exit = Math.min(exit, b);
+  }
+  if (Math.abs(dz) < 1e-7) {
+    if (startZ < minZ || startZ > maxZ) return false;
+  } else {
+    let a = (minZ - startZ) / dz;
+    let b = (maxZ - startZ) / dz;
+    if (a > b) [a, b] = [b, a];
+    enter = Math.max(enter, a);
+    exit = Math.min(exit, b);
+  }
+  return exit >= enter && exit >= 0 && enter <= 1 && enter > 0.015;
+}
+
 function checkBarrierCollision(origin, moveDir, dist = 1.8) {
   const pool = getNearbyBarriers(origin, dist + 1.2);
   if (pool.length === 0) return false;
   const endX = origin.x + moveDir.x * dist;
   const endZ = origin.z + moveDir.z * dist;
-  const sweptMinX = Math.min(origin.x, endX) - 0.9;
-  const sweptMaxX = Math.max(origin.x, endX) + 0.9;
-  const sweptMinZ = Math.min(origin.z, endZ) - 0.9;
-  const sweptMaxZ = Math.max(origin.z, endZ) + 0.9;
   const actorBottom = origin.y - 0.2;
   const actorTop = origin.y + 1.8;
   for (let i = 0; i < pool.length; i++) {
     const box = pool[i].userData.worldBox;
     if (box.max.y < actorBottom || box.min.y > actorTop) continue;
-    if (box.max.x >= sweptMinX && box.min.x <= sweptMaxX
-      && box.max.z >= sweptMinZ && box.min.z <= sweptMaxZ) return pool[i];
+    if (segmentEntersExpandedBox2D(origin.x, origin.z, endX, endZ, box, 1.0)) return pool[i];
   }
   return false;
 }

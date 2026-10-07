@@ -183,57 +183,52 @@ scene.add(sun);
 const carGroup = new THREE.Group();
 scene.add(carGroup);
 
-function createCarMesh() {
-  const car = new THREE.Group();
-
-  // Chassis
-  const bodyGeo = new THREE.BoxGeometry(1.9, 0.55, 4.2);
-  const bodyMat = new THREE.MeshLambertMaterial({ color: 0xd91b1b });
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.position.y = 0.55;
-  body.castShadow = true;
-  car.add(body);
-
-  // Cabin
-  const cabinGeo = new THREE.BoxGeometry(1.5, 0.45, 2.0);
-  const cabinMat = new THREE.MeshLambertMaterial({ color: 0x111625 });
-  const cabin = new THREE.Mesh(cabinGeo, cabinMat);
-  cabin.position.set(0, 0.95, -0.2);
-  cabin.castShadow = true;
-  car.add(cabin);
-
-  // Spoiler
-  const spoilerWing = new THREE.Mesh(
-    new THREE.BoxGeometry(1.8, 0.08, 0.4),
-    new THREE.MeshLambertMaterial({ color: 0x111111 })
-  );
-  spoilerWing.position.set(0, 1.1, 1.9);
-  spoilerWing.castShadow = true;
-  car.add(spoilerWing);
-
-  // Wheels
-  const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 16);
-  const wheelMat = new THREE.MeshLambertMaterial({ color: 0x222222 });
-  const wheelPositions = [
-    [-0.95, 0.38, 1.3],
-    [0.95, 0.38, 1.3],
-    [-0.95, 0.38, -1.3],
-    [0.95, 0.38, -1.3]
-  ];
-
-  wheelPositions.forEach(pos => {
-    const wheel = new THREE.Mesh(wheelGeo, wheelMat);
-    wheel.rotation.z = Math.PI / 2;
-    wheel.position.set(...pos);
-    wheel.castShadow = true;
-    car.add(wheel);
-  });
-
-  return car;
-}
-
-const carVisual = createCarMesh();
+// The supplied Mercedes W206 GLB replaces the temporary block-car placeholder.
+// This root remains attached to the physics body so steering and movement apply to the real model.
+const carVisual = new THREE.Group();
 carGroup.add(carVisual);
+let carModelReady = false;
+
+function loadCarModel() {
+  loader.load('assets/car/mercedes-w206.glb', (gltf) => {
+    const model = gltf.scene;
+    model.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(model);
+    const center = bounds.getCenter(new THREE.Vector3());
+    model.position.set(-center.x, -bounds.min.y, -center.z);
+
+    // The source model's front points +Z; this game drives forward along -Z.
+    const orientation = new THREE.Group();
+    orientation.rotation.y = Math.PI;
+    orientation.add(model);
+    model.traverse((node) => {
+      if (!node.isMesh) return;
+      node.castShadow = false;
+      node.receiveShadow = false;
+      const original = node.material;
+      const sourceMaterials = Array.isArray(original) ? original : [original];
+      const optimizedMaterials = sourceMaterials.map((material) => {
+        if (!material || (!material.isMeshStandardMaterial && !material.isMeshPhysicalMaterial)) return material;
+        return new THREE.MeshLambertMaterial({
+          name: material.name,
+          map: material.map || null,
+          color: material.color ? material.color.clone() : new THREE.Color(0xffffff),
+          side: material.side,
+          vertexColors: material.vertexColors,
+          transparent: material.transparent,
+          alphaTest: material.alphaTest || 0,
+          depthWrite: material.depthWrite
+        });
+      });
+      node.material = Array.isArray(original) ? optimizedMaterials : optimizedMaterials[0];
+    });
+    carVisual.add(orientation);
+    carModelReady = true;
+    console.info('Mercedes W206 loaded and connected to vehicle controls');
+  }, undefined, (error) => {
+    console.error('Mercedes W206 failed to load:', error);
+  });
+}
 
 // 2. Player Humanoid Character
 const playerGroup = new THREE.Group();
@@ -394,7 +389,7 @@ function tryLoadTrack(index = 0) {
       trackLoaded = true;
 
       // Find initial ground height for car
-      snapToSurface(state.car.position, 0.45);
+      snapToSurface(state.car.position, 0.06);
       state.car.lastGroundPosition.copy(state.car.position);
 
       const overlay = document.getElementById('loading-overlay');
@@ -408,6 +403,7 @@ function tryLoadTrack(index = 0) {
   );
 }
 
+loadCarModel();
 tryLoadTrack(0);
 
 // --- Optimized Surface Raycasting & Collision Physics ---
@@ -951,13 +947,21 @@ function animate(now) {
       || Math.abs(state.car.position.z - previousCarZ) > 0.0001;
     let groundHit = null;
     if (carMoved) {
-      groundHit = settleActorOnSurface(state.car.position, state.car, 0.45, dt);
+      groundHit = settleActorOnSurface(state.car.position, state.car, 0.06, dt);
       if (!groundHit) {
-        // The mesh's true outline is irregular. Do not drive off its last valid
-        // supported point just because the broad rectangular world bounds allow it.
-        state.car.position.copy(state.car.lastGroundPosition);
-        state.car.speed = 0;
+        // A single missed surface triangle can be a mesh seam. Keep horizontal
+        // input responsive and let gravity act; only recover after sustained
+        // unsupported travel / a real fall, rather than pinning the car each frame.
+        state.car.unsupportedTime = (state.car.unsupportedTime || 0) + dt;
+        if (state.car.unsupportedTime > 1.5
+          || state.car.position.y < state.car.lastGroundPosition.y - 8) {
+          state.car.position.copy(state.car.lastGroundPosition);
+          state.car.verticalVelocity = 0;
+          state.car.unsupportedTime = 0;
+          state.car.speed = 0;
+        }
       } else {
+        state.car.unsupportedTime = 0;
         enforceWorldPerimeter(state.car.position);
       }
     }

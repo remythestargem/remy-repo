@@ -48,6 +48,24 @@ jobs:
           mv track-mobile.glb track.glb
           ls -lh track.glb
 
+      - name: Download and optimize Mercedes W206 car model
+        run: |
+          mkdir -p my-game/assets/car
+          curl -fL "https://drive.usercontent.google.com/download?id=1_WO-O_L4q9kcNPTrk04h4aJNB6NudSJy&export=download&confirm=t" -o my-game/assets/car/mercedes-source.glb
+          npx --yes @gltf-transform/cli@4.5.1 optimize my-game/assets/car/mercedes-source.glb my-game/assets/car/mercedes-w206.glb \
+            --simplify true \
+            --simplify-ratio 0.36 \
+            --simplify-error 0.0002 \
+            --texture-compress webp \
+            --texture-size 1024 \
+            --compress quantize \
+            --join false \
+            --instance false \
+            --palette false \
+            --prune true
+          rm my-game/assets/car/mercedes-source.glb
+          ls -lh my-game/assets/car/mercedes-w206.glb
+
       - name: Create Android project
         run: |
           mkdir -p apk-build/www

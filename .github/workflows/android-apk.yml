@@ -36,7 +36,7 @@ jobs:
           cd my-game/assets/track
           npx --yes @gltf-transform/cli@4.5.1 optimize track.glb track-mobile.glb \
             --simplify true \
-            --simplify-ratio 0.15 \
+            --simplify-ratio 0.35 \
             --simplify-error 0.0002 \
             --texture-compress webp \
             --texture-size 2048 \
@@ -54,10 +54,10 @@ jobs:
           curl -fL "https://drive.usercontent.google.com/download?id=1_WO-O_L4q9kcNPTrk04h4aJNB6NudSJy&export=download&confirm=t" -o my-game/assets/car/mercedes-source.glb
           npx --yes @gltf-transform/cli@4.5.1 optimize my-game/assets/car/mercedes-source.glb my-game/assets/car/mercedes-w206.glb \
             --simplify true \
-            --simplify-ratio 0.36 \
+            --simplify-ratio 0.65 \
             --simplify-error 0.0002 \
             --texture-compress webp \
-            --texture-size 1024 \
+            --texture-size 2048 \
             --compress quantize \
             --join false \
             --instance false \

@@ -35,11 +35,9 @@ jobs:
         run: |
           cd my-game/assets/track
           npx --yes @gltf-transform/cli@4.5.1 optimize track.glb track-mobile.glb \
-            --simplify true \
-            --simplify-ratio 0.35 \
-            --simplify-error 0.0002 \
+            --simplify false \
             --texture-compress webp \
-            --texture-size 1024 \
+            --texture-size 2048 \
             --compress false \
             --join false \
             --instance false \

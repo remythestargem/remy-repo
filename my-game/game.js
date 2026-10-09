@@ -99,10 +99,10 @@ let lastQualityCheck = performance.now();
 let stableFrameTimeSince = 0;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x7fb5e6);
-scene.fog = new THREE.Fog(0x7fb5e6, 250, 750);
+scene.background = new THREE.Color(0x6ba4d9);
+scene.fog = new THREE.Fog(0x6ba4d9, 650, 2200);
 
-const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.5, 900);
+const camera = new THREE.PerspectiveCamera(56, window.innerWidth / window.innerHeight, 0.4, 2500);
 let renderer;
 try {
   renderer = new THREE.WebGLRenderer({
@@ -171,6 +171,8 @@ applyRenderScale();
 // Lighting
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
 scene.add(ambientLight);
+const hemiLight = new THREE.HemisphereLight(0x7fb5e6, 0x3d4a36, 0.45);
+scene.add(hemiLight);
 
 const sun = new THREE.DirectionalLight(0xfff8e7, 1.25);
 sun.position.set(150, 300, 100);
@@ -208,18 +210,60 @@ function loadCarModel() {
       const original = node.material;
       const sourceMaterials = Array.isArray(original) ? original : [original];
       const optimizedMaterials = sourceMaterials.map((material) => {
-        if (!material || (!material.isMeshStandardMaterial && !material.isMeshPhysicalMaterial)) return material;
+        if (!material) return material;
+        const matName = (material.name || '').toLowerCase();
+
+        let color = material.color ? material.color.clone() : new THREE.Color(0xffffff);
+        let specular = new THREE.Color(0x666666);
+        let shininess = 60;
+        let emissive = new THREE.Color(0x000000);
+        let transparent = !!material.transparent;
+        let opacity = material.opacity !== undefined ? material.opacity : 1.0;
+
+        if (matName.includes('paint')) {
+          // Sleek Mercedes-Benz Iridium Silver metallic body paint
+          color = new THREE.Color(0xb8bcc4);
+          specular = new THREE.Color(0xffffff);
+          shininess = 90;
+        } else if (matName.includes('chrome') || matName.includes('trim') || matName.includes('metallic') || matName.includes('lettering')) {
+          color = new THREE.Color(0xf0f0f0);
+          specular = new THREE.Color(0xffffff);
+          shininess = 120;
+        } else if (matName.includes('glass')) {
+          color = new THREE.Color(0x223344);
+          transparent = true;
+          opacity = 0.45;
+          specular = new THREE.Color(0xffffff);
+          shininess = 100;
+        } else if (matName.includes('headlight') || matName.includes('drl') || matName.includes('lights_29')) {
+          color = new THREE.Color(0xffffff);
+          emissive = new THREE.Color(0x99bbdd);
+          shininess = 100;
+        } else if (matName.includes('tail') || matName.includes('brake') || matName.includes('red')) {
+          color = new THREE.Color(0xcc1111);
+          emissive = new THREE.Color(0x440000);
+          shininess = 80;
+        } else if (matName.includes('tire') || matName.includes('tyr') || matName.includes('wheel')) {
+          color = new THREE.Color(0x1a1a1a);
+          specular = new THREE.Color(0x333333);
+          shininess = 15;
+        } else if (color.r < 0.04 && color.g < 0.04 && color.b < 0.04 && !material.map) {
+          color = new THREE.Color(0x242424);
+        }
+
         return new THREE.MeshPhongMaterial({
           name: material.name,
           map: material.map || null,
-          color: material.color ? material.color.clone() : new THREE.Color(0xffffff),
+          color: color,
+          specular: specular,
+          shininess: shininess,
+          emissive: emissive,
           side: material.side,
           vertexColors: material.vertexColors,
-          transparent: material.transparent,
+          transparent: transparent,
+          opacity: opacity,
           alphaTest: material.alphaTest || 0,
-          depthWrite: material.depthWrite,
-          shininess: 64,
-          specular: new THREE.Color(0x666666)
+          depthWrite: !transparent
         });
       });
       node.material = Array.isArray(original) ? optimizedMaterials : optimizedMaterials[0];
@@ -352,7 +396,7 @@ function tryLoadTrack(index = 0) {
           const mat = child.material;
           const mats = Array.isArray(mat) ? mat : [mat];
           const labels = `${child.name || ''} ${mats.map((m) => m?.name || '').join(' ')}`.toLowerCase();
-          const isBarrier = /guard.?rail|barrier|fence|wall|building|boulder|rock|trunk|curb|kerb/.test(labels);
+          const isBarrier = /guard.?rail|barrier|concrete-barrie|fence|wall|building|grandstand|gstand/.test(labels);
           let isFoliageOrObstacle = false;
 
           // Mobile-grade materials: replace costly PBR (MeshStandardMaterial) with
@@ -555,14 +599,20 @@ function getNearbyColliders(pos, radius = 40, verticalRange = 15) {
 
 function raycastSurface(pos) {
   if (trackColliders.length === 0) return null;
-  const pool = getNearbyColliders(pos, 3);
+  const pool = getNearbyColliders(pos, 6);
   if (pool.length === 0) return null;
-  _scratchRayOrigin.set(pos.x, pos.y + 35, pos.z);
+  _scratchRayOrigin.set(pos.x, pos.y + 20, pos.z);
   downRay.set(_scratchRayOrigin, downDir);
-  downRay.far = 100;
+  downRay.far = 50;
   downRayHits.length = 0;
   downRay.intersectObjects(pool, false, downRayHits);
-  return downRayHits.length ? downRayHits[0] : null;
+  for (let i = 0; i < downRayHits.length; i++) {
+    const h = downRayHits[i];
+    if (!h.face) return h;
+    const wn = h.face.normal.clone().transformDirection(h.object.matrixWorld);
+    if (wn.y > 0.35) return h;
+  }
+  return null;
 }
 
 function snapToSurface(pos, heightOffset = 0.5) {
@@ -572,91 +622,43 @@ function snapToSurface(pos, heightOffset = 0.5) {
 }
 
 function findInitialCarSpawn() {
-  const originX = state.car.position.x;
-  const originZ = state.car.position.z;
-  const bounds = trackWorldBounds;
-  const highY = bounds ? bounds.max.y + 10 : 1000;
-  const verticalRange = bounds
-    ? Math.max(100, bounds.max.y - bounds.min.y + 20)
-    : 2000;
-  const rayFar = verticalRange + 20;
-  const candidates = [{ x: originX, z: originZ }];
+  const originX = VEHICLE_CONFIG.initialPosition.x;
+  const originZ = VEHICLE_CONFIG.initialPosition.z;
+  const highY = 60;
+  const candidates = [
+    { x: originX, z: originZ },
+    { x: -322.0, z: -760.0 },
+    { x: -318.0, z: -740.0 },
+    { x: -310.0, z: -720.0 },
+    { x: -302.0, z: -700.0 }
+  ];
 
-  if (bounds) {
-    candidates.push({ x: bounds.getCenter(_scratchVec2).x, z: bounds.getCenter(_scratchVec2).z });
-    // Mesh centers often land on the road even when the exported scene origin
-    // is offset. Sort so the closest usable road point is preferred.
-    const meshCenters = [];
-    for (let i = 0; i < trackColliders.length; i++) {
-      const box = trackColliders[i].userData.worldBox;
-      if (!box) continue;
-      meshCenters.push({ x: (box.min.x + box.max.x) * 0.5, z: (box.min.z + box.max.z) * 0.5 });
-    }
-    meshCenters.sort((a, b) => (a.x - originX) ** 2 + (a.z - originZ) ** 2
-      - ((b.x - originX) ** 2 + (b.z - originZ) ** 2));
-    candidates.push(...meshCenters.slice(0, 48));
-  }
-
-  // If the exporter split the road into strips whose centers miss the actual
-  // road surface, sample a compact spiral around both likely world origins.
-  const anchors = bounds
-    ? [{ x: originX, z: originZ }, { x: (bounds.min.x + bounds.max.x) * 0.5, z: (bounds.min.z + bounds.max.z) * 0.5 }]
-    : [{ x: originX, z: originZ }];
-  for (const anchor of anchors) {
-    for (const radius of [12, 24, 48, 96, 192, 384]) {
-      for (let step = 0; step < 12; step++) {
-        const angle = (step / 12) * Math.PI * 2;
-        candidates.push({ x: anchor.x + Math.cos(angle) * radius, z: anchor.z + Math.sin(angle) * radius });
-      }
-    }
-  }
-
-  let bestHit = null;
-  let bestDistance = Infinity;
   for (let i = 0; i < candidates.length; i++) {
-    const candidate = candidates[i];
-    candidateBox.min.set(candidate.x - 3, bounds ? bounds.min.y - 10 : -1000, candidate.z - 3);
-    candidateBox.max.set(candidate.x + 3, bounds ? bounds.max.y + 10 : 1000, candidate.z + 3);
-    nearbyColliders.length = 0;
-    const queryId = ++colliderQuerySequence;
-    for (let j = 0; j < unindexedColliders.length; j++) addNearbyCollider(unindexedColliders[j], queryId);
-    const minCellX = Math.floor(candidateBox.min.x / colliderGridCellSize);
-    const maxCellX = Math.floor(candidateBox.max.x / colliderGridCellSize);
-    const minCellZ = Math.floor(candidateBox.min.z / colliderGridCellSize);
-    const maxCellZ = Math.floor(candidateBox.max.z / colliderGridCellSize);
-    for (let x = minCellX; x <= maxCellX; x++) {
-      for (let z = minCellZ; z <= maxCellZ; z++) {
-        const cell = getColliderCell(x, z);
-        if (cell) for (let j = 0; j < cell.length; j++) addNearbyCollider(cell[j], queryId);
-      }
-    }
-    if (!nearbyColliders.length) continue;
-    _scratchRayOrigin.set(candidate.x, highY, candidate.z);
-    downRay.set(_scratchRayOrigin, downDir);
-    downRay.near = 0;
-    downRay.far = rayFar;
+    const c = candidates[i];
+    downRay.set(new THREE.Vector3(c.x, highY, c.z), downDir);
+    downRay.far = 80;
     downRayHits.length = 0;
-    downRay.intersectObjects(nearbyColliders, false, downRayHits);
-    if (!downRayHits.length) continue;
-    const hit = downRayHits[0];
-    const distance = (candidate.x - originX) ** 2 + (candidate.z - originZ) ** 2;
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      bestHit = hit;
+    downRay.intersectObjects(trackColliders, false, downRayHits);
+    for (let j = 0; j < downRayHits.length; j++) {
+      const hit = downRayHits[j];
+      const wn = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : null;
+      if (!wn || wn.y > 0.35) {
+        state.car.position.set(hit.point.x, hit.point.y + 0.06, hit.point.z);
+        state.car.heading = VEHICLE_CONFIG.initialHeading;
+        state.car.verticalVelocity = 0;
+        state.car.unsupportedTime = 0;
+        state.car.lastGroundPosition.copy(state.car.position);
+        console.info('Vehicle spawned on Spa starting grid at:', state.car.position.toArray());
+        return hit;
+      }
     }
   }
 
-  if (!bestHit) return null;
-  if (Math.abs(bestHit.point.y) > 200) {
-    console.warn('Spawn hit Y coordinate abnormal, falling back to track road level:', bestHit.point.toArray());
-    state.car.position.set(0, -9.42, 0);
-  } else {
-    state.car.position.set(bestHit.point.x, bestHit.point.y + 0.06, bestHit.point.z);
-  }
-  state.car.verticalVelocity = 0;
-  state.car.unsupportedTime = 0;
-  console.info('Vehicle spawned on track surface', state.car.position.toArray());
-  return bestHit;
+  state.car.position.copy(VEHICLE_CONFIG.initialPosition);
+  state.car.heading = VEHICLE_CONFIG.initialHeading;
+  state.car.lastGroundPosition.copy(state.car.position);
+  console.info('Vehicle defaulted to Spa starting grid:', state.car.position.toArray());
+  return null;
 }
 
 // Follow the irregular track surface, applying gravity while airborne and landing
@@ -718,19 +720,18 @@ function segmentEntersExpandedBox2D(startX, startZ, endX, endZ, box, radius) {
   return exit >= enter && exit >= 0 && enter <= 1 && enter > 0.015;
 }
 
+const _barrierRay = new THREE.Raycaster();
+const _barrierRayHits = [];
+
 function checkBarrierCollision(origin, moveDir, dist = 1.8) {
-  const pool = getNearbyBarriers(origin, dist + 1.2);
+  const pool = getNearbyBarriers(origin, dist + 2.0);
   if (pool.length === 0) return false;
-  const endX = origin.x + moveDir.x * dist;
-  const endZ = origin.z + moveDir.z * dist;
-  const actorBottom = origin.y - 0.2;
-  const actorTop = origin.y + 1.8;
-  for (let i = 0; i < pool.length; i++) {
-    const box = pool[i].userData.worldBox;
-    if (box.max.y < actorBottom || box.min.y > actorTop) continue;
-    if (segmentEntersExpandedBox2D(origin.x, origin.z, endX, endZ, box, 1.0)) return pool[i];
-  }
-  return false;
+  _scratchRayOrigin.set(origin.x, origin.y + 0.5, origin.z);
+  _barrierRay.set(_scratchRayOrigin, moveDir);
+  _barrierRay.far = Math.max(1.2, dist);
+  _barrierRayHits.length = 0;
+  _barrierRay.intersectObjects(pool, false, _barrierRayHits);
+  return _barrierRayHits.length > 0 ? _barrierRayHits[0] : false;
 }
 
 // World edge boundaries
@@ -1101,12 +1102,14 @@ function animate(now) {
     carGroup.rotation.y = state.car.heading;
 
     // Pitch/roll alignment with hill terrain (stabilized: prevent flipping)
-    if (groundHit && groundHit.face && groundHit.face.normal.y > 0.65) {
-      const normal = groundHit.face.normal;
-      const targetPitch = Math.max(-0.25, Math.min(0.25, -normal.z * 0.6));
-      const targetRoll = Math.max(-0.25, Math.min(0.25, normal.x * 0.6));
-      carGroup.rotation.x = THREE.MathUtils.lerp(carGroup.rotation.x, targetPitch, 0.1);
-      carGroup.rotation.z = THREE.MathUtils.lerp(carGroup.rotation.z, targetRoll, 0.1);
+    if (groundHit && groundHit.face) {
+      const normal = groundHit.face.normal.clone().transformDirection(groundHit.object.matrixWorld);
+      if (normal.y > 0.45) {
+        const targetPitch = Math.max(-0.35, Math.min(0.35, -normal.z * 0.7));
+        const targetRoll = Math.max(-0.35, Math.min(0.35, normal.x * 0.7));
+        carGroup.rotation.x = THREE.MathUtils.lerp(carGroup.rotation.x, targetPitch, 0.15);
+        carGroup.rotation.z = THREE.MathUtils.lerp(carGroup.rotation.z, targetRoll, 0.15);
+      }
     } else {
       carGroup.rotation.x = THREE.MathUtils.lerp(carGroup.rotation.x, 0, 0.1);
       carGroup.rotation.z = THREE.MathUtils.lerp(carGroup.rotation.z, 0, 0.1);

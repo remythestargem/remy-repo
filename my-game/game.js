@@ -30,9 +30,9 @@ const state = {
     steerAngle: 0,
     steerMax: 0.035,
     heading: 0,
-    position: new THREE.Vector3(0, 1.0, 0),
+    position: new THREE.Vector3(0, -9.42, 0),
     verticalVelocity: 0,
-    lastGroundPosition: new THREE.Vector3(0, 1.0, 0),
+    lastGroundPosition: new THREE.Vector3(0, -9.42, 0),
     normal: new THREE.Vector3(0, 1, 0),
     gear: 'N',
     isOnRoad: true
@@ -92,9 +92,9 @@ const container = document.getElementById('game-container');
 const canvas = document.getElementById('game-canvas');
 const hasCoarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
 const isMobileDevice = hasCoarsePointer || 'ontouchstart' in window;
-const maxDevicePixelRatio = isMobileDevice ? 1.25 : 1.5;
-const minMobileRenderScale = 0.7;
-let renderScale = isMobileDevice ? 0.9 : 1;
+const maxDevicePixelRatio = 1.5;
+const minMobileRenderScale = 0.85;
+let renderScale = 1.0;
 let lastQualityCheck = performance.now();
 let stableFrameTimeSince = 0;
 
@@ -102,14 +102,14 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x7fb5e6);
 scene.fog = new THREE.Fog(0x7fb5e6, 250, 750);
 
-const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.5, 750);
+const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.5, 900);
 let renderer;
 try {
   renderer = new THREE.WebGLRenderer({
     canvas: canvas,
-    antialias: false,
+    antialias: true,
     powerPreference: 'high-performance',
-    precision: 'mediump'
+    precision: 'highp'
   });
 } catch (error) {
   const overlay = document.getElementById('loading-overlay');
@@ -218,8 +218,8 @@ function loadCarModel() {
           transparent: material.transparent,
           alphaTest: material.alphaTest || 0,
           depthWrite: material.depthWrite,
-          shininess: 32,
-          specular: new THREE.Color(0x383838)
+          shininess: 64,
+          specular: new THREE.Color(0x666666)
         });
       });
       node.material = Array.isArray(original) ? optimizedMaterials : optimizedMaterials[0];
@@ -321,9 +321,15 @@ const trackPaths = [
 
 function tryLoadTrack(index = 0) {
   if (index >= trackPaths.length) {
+    console.error('All track paths failed to load!');
+    const msg = document.getElementById('loading-text');
+    if (msg) msg.textContent = 'Track failed to load. Please check asset paths.';
     const overlay = document.getElementById('loading-overlay');
-    if (overlay) overlay.style.opacity = '0';
-    setTimeout(() => { if (overlay) overlay.style.display = 'none'; }, 500);
+    if (overlay) {
+      overlay.style.background = 'rgba(0,0,0,0.85)';
+      overlay.innerHTML = '<div style="color:#ef4444;font-size:1.2rem;text-align:center;padding:24px;">Failed to load Spa track asset.<br><span style="font-size:0.9rem;color:#cbd5e1;">Tap to dismiss</span></div>';
+      overlay.onclick = () => { overlay.style.display = 'none'; };
+    }
     return;
   }
 
@@ -339,8 +345,7 @@ function tryLoadTrack(index = 0) {
           child.castShadow = false;
           child.receiveShadow = false;
           if (child.geometry) {
-            child.geometry.computeBoundingBox();
-            const wBox = new THREE.Box3().copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
+            const wBox = new THREE.Box3().setFromObject(child);
             child.userData.worldBox = wBox;
           }
 
@@ -642,7 +647,12 @@ function findInitialCarSpawn() {
   }
 
   if (!bestHit) return null;
-  state.car.position.set(bestHit.point.x, bestHit.point.y + 0.06, bestHit.point.z);
+  if (Math.abs(bestHit.point.y) > 200) {
+    console.warn('Spawn hit Y coordinate abnormal, falling back to track road level:', bestHit.point.toArray());
+    state.car.position.set(0, -9.42, 0);
+  } else {
+    state.car.position.set(bestHit.point.x, bestHit.point.y + 0.06, bestHit.point.z);
+  }
   state.car.verticalVelocity = 0;
   state.car.unsupportedTime = 0;
   console.info('Vehicle spawned on track surface', state.car.position.toArray());
@@ -1102,12 +1112,12 @@ function animate(now) {
       carGroup.rotation.z = THREE.MathUtils.lerp(carGroup.rotation.z, 0, 0.1);
     }
 
-    // Smooth chase camera with touch-drag orbit.
-    const camDistance = 8.5;
-    const camPitch = 0.22 + cameraOrbitPitch;
+    // Smooth chase camera with touch-drag orbit - tuned close for cinematic racing feel.
+    const camDistance = 5.4;
+    const camPitch = 0.16 + cameraOrbitPitch;
     const camHeading = state.car.heading + cameraOrbitYaw;
     const horizontalDistance = Math.cos(camPitch) * camDistance;
-    const focusY = state.car.position.y + 1.2;
+    const focusY = state.car.position.y + 0.85;
     _scratchCamTarget.set(
       state.car.position.x + Math.sin(camHeading) * horizontalDistance,
       focusY + Math.sin(camPitch) * camDistance,

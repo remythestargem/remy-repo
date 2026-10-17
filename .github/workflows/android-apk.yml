@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -24,6 +27,9 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+
+      - name: Check game JavaScript syntax
+        run: node --check my-game/game.js
 
       - name: Download 3D track asset
         run: |

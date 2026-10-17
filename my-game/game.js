@@ -71,6 +71,9 @@ let modeTransition = null;
 let cameraOrbitPitch = 0;
 const pointerInputCounts = { gas: 0, brake: 0, left: 0, right: 0 };
 const activePointers = new Map();
+let stickPointerId = null;
+let stickElement = null;
+let stickKnob = null;
 const inputKeys = Object.keys(input);
 
 function refreshInput(key) {
@@ -84,6 +87,21 @@ function releaseAllInputs() {
     }
   });
   activePointers.clear();
+
+  // Also clear the analog stick: blur/visibility changes do not always deliver
+  // pointercancel on mobile, which could otherwise leave movement stuck on.
+  const capturedStickPointer = stickPointerId;
+  stickPointerId = null;
+  stickInput.x = 0;
+  stickInput.y = 0;
+  stickInput.active = false;
+  if (stickKnob) stickKnob.style.transform = 'translate(0px, 0px)';
+  if (stickElement) {
+    stickElement.classList.remove('active');
+    if (capturedStickPointer !== null && stickElement.hasPointerCapture?.(capturedStickPointer)) {
+      stickElement.releasePointerCapture(capturedStickPointer);
+    }
+  }
 
   for (const key of inputKeys) {
     keyboardInput[key] = false;
@@ -922,7 +940,8 @@ function setupInput() {
   // Analog left stick: car steering, or relative movement while on foot.
   const stick = document.getElementById('steer-pad');
   const knob = document.getElementById('steer-knob');
-  let stickPointerId = null;
+  stickElement = stick;
+  stickKnob = knob;
   const updateStick = (event) => {
     if (!stick || event.pointerId !== stickPointerId) return;
     const rect = stick.getBoundingClientRect();
@@ -1057,10 +1076,13 @@ function updateHUD(dt) {
   }
 }
 
-// On-screen diagnostics (remove once rendering is confirmed working).
-const debugElem = document.createElement('div');
-debugElem.style.cssText = 'position:fixed;left:8px;bottom:140px;z-index:9999;color:#7CFC00;font:11px monospace;background:rgba(0,0,0,0.6);padding:4px 6px;pointer-events:none;white-space:pre;border-radius:4px;';
-document.body.appendChild(debugElem);
+// Detailed diagnostics are opt-in so they do not cover the mobile controls.
+const debugEnabled = new URLSearchParams(window.location.search).get('debug') === '1';
+const debugElem = debugEnabled ? document.createElement('div') : null;
+if (debugElem) {
+  debugElem.style.cssText = 'position:fixed;left:8px;bottom:140px;z-index:9999;color:#7CFC00;font:11px monospace;background:rgba(0,0,0,0.6);padding:4px 6px;pointer-events:none;white-space:pre;border-radius:4px;';
+  document.body.appendChild(debugElem);
+}
 let glContextLost = false;
 renderer.domElement.addEventListener('webglcontextlost', (e) => { e.preventDefault(); glContextLost = true; });
 
@@ -1108,7 +1130,9 @@ function animate(now) {
     const forwardZ = -Math.cos(state.car.heading);
     const metersPerSec = (state.car.speed * 1000) / 3600;
 
-    _scratchVec1.set(forwardX, 0, forwardZ).normalize();
+    // Collision probes must follow actual travel direction, including reverse.
+    const travelSign = metersPerSec < 0 ? -1 : 1;
+    _scratchVec1.set(forwardX * travelSign, 0, forwardZ * travelSign).normalize();
     const moveVec = _scratchVec1;
     const previousCarX = state.car.position.x;
     const previousCarZ = state.car.position.z;
@@ -1275,11 +1299,13 @@ function animate(now) {
     if (fpsElem) fpsElem.textContent = curFps + ' FPS';
     if (frameTimeElem) frameTimeElem.textContent = curFrameMs.toFixed(1) + ' ms';
     updateHUD(dt);
-    const dbgInfo = renderer.info;
-    debugElem.textContent =
-      `ctx ${glContextLost || renderer.getContext().isContextLost() ? 'LOST' : 'ok'}  calls ${dbgInfo.render.calls}  tris ${dbgInfo.render.triangles}\n` +
-      `geo ${dbgInfo.memory.geometries}  tex ${dbgInfo.memory.textures}  track ${trackLoaded ? 'yes' : 'no'}  colliders ${trackColliders.length}\n` +
-      `car ${state.car.position.x.toFixed(0)},${state.car.position.y.toFixed(1)},${state.car.position.z.toFixed(0)}  cam ${camera.position.x.toFixed(0)},${camera.position.y.toFixed(1)},${camera.position.z.toFixed(0)}  far ${camera.far.toFixed(0)}`;
+    if (debugElem) {
+      const dbgInfo = renderer.info;
+      debugElem.textContent =
+        `ctx ${glContextLost || renderer.getContext().isContextLost() ? 'LOST' : 'ok'}  calls ${dbgInfo.render.calls}  tris ${dbgInfo.render.triangles}\n` +
+        `geo ${dbgInfo.memory.geometries}  tex ${dbgInfo.memory.textures}  track ${trackLoaded ? 'yes' : 'no'}  colliders ${trackColliders.length}\n` +
+        `car ${state.car.position.x.toFixed(0)},${state.car.position.y.toFixed(1)},${state.car.position.z.toFixed(0)}  cam ${camera.position.x.toFixed(0)},${camera.position.y.toFixed(1)},${camera.position.z.toFixed(0)}  far ${camera.far.toFixed(0)}`;
+    }
   }
 
   renderer.render(scene, camera);

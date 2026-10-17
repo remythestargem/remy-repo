@@ -20,8 +20,10 @@ const renderScaleElem = document.getElementById('render-scale-counter');
 // Starting-grid spawn used by findInitialCarSpawn(). Heading follows the game's
 // convention (forward = -sin(h), -cos(h)); flip by Math.PI if the car starts facing backwards.
 const VEHICLE_CONFIG = {
-  initialPosition: new THREE.Vector3(-322.0, 0.0, -760.0),
-  initialHeading: Math.PI + 0.32
+  // Real Spa start/finish line: the start-lights gantry is at x -322, z -746 (road centre, surface y ~21.5).
+  // The car sits in the pole slot ~8 m behind the line, facing the first corner (La Source).
+  initialPosition: new THREE.Vector3(-317.8, 21.5, -739.4),
+  initialHeading: 0.555
 };
 
 const state = {
@@ -663,13 +665,11 @@ function snapToSurface(pos, heightOffset = 0.5) {
 function findInitialCarSpawn() {
   const originX = VEHICLE_CONFIG.initialPosition.x;
   const originZ = VEHICLE_CONFIG.initialPosition.z;
-  const highY = 60;
+  const highY = VEHICLE_CONFIG.initialPosition.y + 3; // cast from just above the road, below the gantry roof
   const candidates = [
     { x: originX, z: originZ },
-    { x: -322.0, z: -760.0 },
-    { x: -318.0, z: -740.0 },
-    { x: -310.0, z: -720.0 },
-    { x: -302.0, z: -700.0 }
+    { x: originX + 1.5, z: originZ + 2.4 },
+    { x: originX + 3.0, z: originZ + 4.8 }
   ];
 
   for (let i = 0; i < candidates.length; i++) {

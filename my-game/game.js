@@ -68,6 +68,7 @@ const keyboardInput = { gas: false, brake: false, left: false, right: false };
 const stickInput = { x: 0, y: 0, active: false };
 let cameraOrbitYaw = 0;
 let modeTransition = null;
+let lastRuntimeError = '';
 let cameraOrbitPitch = 0;
 let lookPointerId = null;
 const pointerInputCounts = { gas: 0, brake: 0, left: 0, right: 0 };
@@ -288,6 +289,7 @@ function loadCarModel() {
     console.info('Mercedes W206 loaded and connected to vehicle controls');
   }, undefined, (error) => {
     console.error('Mercedes W206 failed to load:', error);
+    lastRuntimeError = 'car: ' + (error && error.message ? error.message : error);
   });
 }
 
@@ -379,6 +381,7 @@ const trackPaths = [
 ];
 
 function showLoadError(err) {
+  lastRuntimeError = 'track: ' + (err && err.message ? err.message : err);
   const msg = document.getElementById('loading-text');
   if (msg) msg.textContent = 'Load error: ' + (err && err.message ? err.message : err);
 }
@@ -503,7 +506,8 @@ function tryLoadTrack(index = 0) {
       }
     },
     onTrackProgress,
-    () => {
+    (err) => {
+      lastRuntimeError = 'track path ' + trackPaths[index] + ': ' + (err && err.message ? err.message : 'failed');
       tryLoadTrack(index + 1);
     }
   );
@@ -819,7 +823,7 @@ function toggleMode() {
     playerGroup.scale.setScalar(0.16);
     playerGroup.visible = true;
     state.mode = 'foot';
-    modeTransition = { kind: 'exit', elapsed: 0, duration: 0.35, from: start, to: target };
+    modeTransition = { startWall: performance.now(), kind: 'exit', elapsed: 0, duration: 0.35, from: start, to: target };
     if (btnToggle) { btnToggle.textContent = 'EXITING...'; btnToggle.style.background = 'rgba(220, 38, 38, 0.85)'; }
     if (modeVal) modeVal.textContent = 'EXITING';
     if (speedoBox) speedoBox.style.opacity = '0.3';
@@ -835,7 +839,7 @@ function toggleMode() {
       state.car.position.z - Math.sin(state.car.heading) * 1.8
     );
     snapToSurface(door, 0.0);
-    modeTransition = { kind: 'enter', elapsed: 0, duration: 0.62, from: state.player.position.clone(), to: door };
+    modeTransition = { startWall: performance.now(), kind: 'enter', elapsed: 0, duration: 0.62, from: state.player.position.clone(), to: door };
     if (btnToggle) btnToggle.textContent = 'ENTERING...';
     if (modeVal) modeVal.textContent = 'ENTERING';
   }
@@ -845,7 +849,8 @@ function updateModeTransition(dt) {
   if (!modeTransition) return;
   const tr = modeTransition;
   tr.elapsed = Math.min(tr.duration, tr.elapsed + dt);
-  const linear = tr.elapsed / tr.duration;
+  const wallLinear = (performance.now() - tr.startWall) / (tr.duration * 1000);
+  const linear = Math.min(1, Math.max(tr.elapsed / tr.duration, wallLinear));
   const t = linear * linear * (3 - 2 * linear);
   playerGroup.position.lerpVectors(tr.from, tr.to, t);
   state.player.position.copy(playerGroup.position);
@@ -1073,10 +1078,8 @@ renderer.domElement.addEventListener('webglcontextlost', (e) => { e.preventDefau
 let lastTime = performance.now();
 let animationFrameId = 0;
 
-function animate(now) {
-  animationFrameId = 0;
-  if (document.hidden) return;
-  const dt = Math.min((now - lastTime) / 1000, 0.1);
+function frameUpdate(now) {
+  const dt = Math.max(0, Math.min((now - lastTime) / 1000, 0.1));
   lastTime = now;
 
   updateModeTransition(dt);
@@ -1288,10 +1291,20 @@ function animate(now) {
     debugElem.textContent =
       `ctx ${glContextLost || renderer.getContext().isContextLost() ? 'LOST' : 'ok'}  calls ${dbgInfo.render.calls}  tris ${dbgInfo.render.triangles}\n` +
       `geo ${dbgInfo.memory.geometries}  tex ${dbgInfo.memory.textures}  track ${trackLoaded ? 'yes' : 'no'}  colliders ${trackColliders.length}\n` +
-      `car ${state.car.position.x.toFixed(0)},${state.car.position.y.toFixed(1)},${state.car.position.z.toFixed(0)}  cam ${camera.position.x.toFixed(0)},${camera.position.y.toFixed(1)},${camera.position.z.toFixed(0)}  far ${camera.far.toFixed(0)}`;
+      `car ${state.car.position.x.toFixed(0)},${state.car.position.y.toFixed(1)},${state.car.position.z.toFixed(0)}  cam ${camera.position.x.toFixed(0)},${camera.position.y.toFixed(1)},${camera.position.z.toFixed(0)}  far ${camera.far.toFixed(0)}\nerr ${lastRuntimeError || 'none'}`;
   }
 
   renderer.render(scene, camera);
+}
+
+function animate(now) {
+  animationFrameId = 0;
+  if (document.hidden) return;
+  try {
+    frameUpdate(now);
+  } catch (err) {
+    lastRuntimeError = err && err.message ? err.message : String(err);
+  }
   animationFrameId = requestAnimationFrame(animate);
 }
 

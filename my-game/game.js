@@ -69,6 +69,7 @@ const stickInput = { x: 0, y: 0, active: false };
 let cameraOrbitYaw = 0;
 let modeTransition = null;
 let cameraOrbitPitch = 0;
+let lookPointerId = null;
 const pointerInputCounts = { gas: 0, brake: 0, left: 0, right: 0 };
 const activePointers = new Map();
 const inputKeys = Object.keys(input);
@@ -109,9 +110,9 @@ let stableFrameTimeSince = 0;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x6ba4d9);
-scene.fog = new THREE.Fog(0x6ba4d9, 650, 2200);
+scene.fog = new THREE.Fog(0x6ba4d9, 1400, 4200);
 
-const camera = new THREE.PerspectiveCamera(56, window.innerWidth / window.innerHeight, 0.4, 2500);
+const camera = new THREE.PerspectiveCamera(56, window.innerWidth / window.innerHeight, 0.4, 4500);
 let renderer;
 try {
   renderer = new THREE.WebGLRenderer({
@@ -203,6 +204,11 @@ let carModelReady = false;
 function loadCarModel() {
   loader.load('assets/car/mercedes-w206.glb', (gltf) => {
     const model = gltf.scene;
+    model.updateMatrixWorld(true);
+    // Normalize the car to a real length (~4.9 m) so it matches the track's scale.
+    const rawSize = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
+    const carLengthMeters = 4.9;
+    model.scale.setScalar(carLengthMeters / Math.max(rawSize.x, rawSize.z, 0.0001));
     model.updateMatrixWorld(true);
     const bounds = new THREE.Box3().setFromObject(model);
     const center = bounds.getCenter(new THREE.Vector3());
@@ -813,7 +819,7 @@ function toggleMode() {
     playerGroup.scale.setScalar(0.16);
     playerGroup.visible = true;
     state.mode = 'foot';
-    modeTransition = { kind: 'exit', elapsed: 0, duration: 0.62, from: start, to: target };
+    modeTransition = { kind: 'exit', elapsed: 0, duration: 0.35, from: start, to: target };
     if (btnToggle) { btnToggle.textContent = 'EXITING...'; btnToggle.style.background = 'rgba(220, 38, 38, 0.85)'; }
     if (modeVal) modeVal.textContent = 'EXITING';
     if (speedoBox) speedoBox.style.opacity = '0.3';
@@ -961,7 +967,6 @@ function setupInput() {
   }
 
   // Drag anywhere on the unobstructed game view to orbit the chase camera.
-  let lookPointerId = null;
   let lastLookX = 0;
   let lastLookY = 0;
   canvas.addEventListener('pointerdown', (event) => {
@@ -1167,7 +1172,7 @@ function animate(now) {
     }
 
     // Smooth chase camera with touch-drag orbit - tuned close for cinematic racing feel.
-    const camDistance = 5.4;
+    const camDistance = 6.5;
     const camPitch = 0.16 + cameraOrbitPitch;
     const camHeading = state.car.heading + cameraOrbitYaw;
     const horizontalDistance = Math.cos(camPitch) * camDistance;
@@ -1177,7 +1182,7 @@ function animate(now) {
       focusY + Math.sin(camPitch) * camDistance,
       state.car.position.z + Math.cos(camHeading) * horizontalDistance
     );
-    camera.position.lerp(_scratchCamTarget, 1 - Math.exp(-15 * dt));
+    camera.position.lerp(_scratchCamTarget, 1 - Math.exp(-10 * dt));
     camera.lookAt(state.car.position.x, focusY, state.car.position.z);
 
   } else if (!modeTransition) {
@@ -1248,6 +1253,10 @@ function animate(now) {
 
     // Close third-person chase camera with the same drag-to-look orbit as driving.
     const pCamDist = 4.2;
+    if (lookPointerId === null) {
+      cameraOrbitYaw *= Math.exp(-2.5 * dt);
+      cameraOrbitPitch *= Math.exp(-2.5 * dt);
+    }
     const pCamPitch = 0.24 + cameraOrbitPitch;
     const pCamHeading = state.player.heading + cameraOrbitYaw;
     const pHorizontalDistance = Math.cos(pCamPitch) * pCamDist;

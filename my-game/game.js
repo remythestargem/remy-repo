@@ -205,6 +205,7 @@ let carModelReady = false;
 function loadCarModel() {
   loader.load('assets/car/mercedes-w206.glb', (gltf) => {
     const model = gltf.scene;
+    sanitizeGeometryAttributes(model);
     model.updateMatrixWorld(true);
     // Normalize the car to a real length (~4.9 m) so it matches the track's scale.
     const rawSize = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
@@ -380,6 +381,29 @@ const trackPaths = [
   'assets/track/scene.gltf'
 ];
 
+// GLTFLoader stores null for accessors that have no data, and the renderer
+// then crashes on 'isGLBufferAttribute' every frame. Remove those entries.
+function sanitizeGeometryAttributes(root) {
+  let removed = 0;
+  root.traverse((node) => {
+    const geo = node.geometry;
+    if (!geo) return;
+    for (const key of Object.keys(geo.attributes || {})) {
+      if (!geo.attributes[key]) { delete geo.attributes[key]; removed++; }
+    }
+    for (const key of Object.keys(geo.morphAttributes || {})) {
+      const list = geo.morphAttributes[key];
+      if (Array.isArray(list) && list.some((a) => !a)) {
+        const kept = list.filter(Boolean);
+        if (kept.length) geo.morphAttributes[key] = kept; else delete geo.morphAttributes[key];
+        removed++;
+      }
+    }
+  });
+  if (removed) console.warn('Removed ' + removed + ' empty geometry attributes');
+  return removed;
+}
+
 function showLoadError(err) {
   lastRuntimeError = 'track: ' + (err && err.message ? err.message : err);
   const msg = document.getElementById('loading-text');
@@ -414,6 +438,7 @@ function tryLoadTrack(index = 0) {
       if (prepMsg) prepMsg.textContent = 'Preparing track...';
       try {
       const trackModel = gltf.scene;
+      sanitizeGeometryAttributes(trackModel);
       
       trackModel.updateMatrixWorld(true);
       trackModel.traverse((child) => {

@@ -92,8 +92,8 @@ const container = document.getElementById('game-container');
 const canvas = document.getElementById('game-canvas');
 const hasCoarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
 const isMobileDevice = hasCoarsePointer || 'ontouchstart' in window;
-const maxDevicePixelRatio = 1.5;
-const minMobileRenderScale = 0.85;
+const maxDevicePixelRatio = 2;
+const minMobileRenderScale = 0.6;
 let renderScale = 1.0;
 let lastQualityCheck = performance.now();
 let stableFrameTimeSince = 0;
@@ -407,12 +407,16 @@ function tryLoadTrack(index = 0) {
             const isFoliage = matName.includes('tree') || matName.includes('leaf') || matName.includes('veg') || matName.includes('fence') || matName.includes('alpha');
             if (isFoliage) isFoliageOrObstacle = true;
 
+            if (m.map) m.map.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
             if (m.isMeshStandardMaterial || m.isMeshPhysicalMaterial) {
               return new THREE.MeshLambertMaterial({
                 name: m.name,
                 map: m.map || null,
                 color: m.color ? m.color.clone() : new THREE.Color(0xffffff),
                 transparent: false,
+                alphaMap: m.alphaMap || null,
+                emissive: m.emissive ? m.emissive.clone() : new THREE.Color(0x000000),
+                emissiveMap: m.emissiveMap || null,
                 alphaTest: (isFoliage || m.transparent) ? 0.5 : 0,
                 depthWrite: true,
                 side: m.side,
@@ -441,6 +445,16 @@ function tryLoadTrack(index = 0) {
       trackLoaded = true;
       trackModel.updateMatrixWorld(true);
       trackWorldBounds = new THREE.Box3().setFromObject(trackModel);
+
+      // Scale draw distance and fog to the real size of the world so distant
+      // terrain (islands, hills) is not clipped or swallowed by fog.
+      {
+        const reach = Math.min(10000, trackWorldBounds.getSize(new THREE.Vector3()).length() * 1.2);
+        camera.far = Math.max(camera.far, reach);
+        camera.updateProjectionMatrix();
+        scene.fog.near = Math.max(scene.fog.near, reach * 0.3);
+        scene.fog.far = Math.max(scene.fog.far, reach * 0.9);
+      }
 
       // Find an actual drivable surface before enabling vehicle physics. The
       // track asset's origin is not guaranteed to lie on the road surface.

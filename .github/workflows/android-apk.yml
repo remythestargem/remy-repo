@@ -29,15 +29,18 @@ jobs:
         run: |
           mkdir -p my-game/assets/track
           curl -fL "https://drive.usercontent.google.com/download?id=1RRDa4SuIEMT3ej1yLatr6gN_6_XAapXJ&export=download&confirm=t" -o my-game/assets/track/track.glb
+          head -c 4 my-game/assets/track/track.glb | grep -q glTF || { echo 'Track download is not a GLB (Google Drive blocked it?)'; head -c 300 my-game/assets/track/track.glb; exit 1; }
           ls -lh my-game/assets/track/track.glb
 
       - name: Optimize track for mobile (gltf-transform pipeline)
         run: |
           cd my-game/assets/track
           npx --yes @gltf-transform/cli@4.5.1 optimize track.glb track-mobile.glb \
-            --simplify false \
+            --simplify true \
+            --simplify-ratio 0.4 \
+            --simplify-error 0.004 \
             --texture-compress webp \
-            --texture-size 2048 \
+            --texture-size 1024 \
             --compress false \
             --join false \
             --instance false \
@@ -50,8 +53,11 @@ jobs:
         run: |
           mkdir -p my-game/assets/car
           curl -fL "https://drive.usercontent.google.com/download?id=1_WO-O_L4q9kcNPTrk04h4aJNB6NudSJy&export=download&confirm=t" -o my-game/assets/car/mercedes-source.glb
+          head -c 4 my-game/assets/car/mercedes-source.glb | grep -q glTF || { echo 'Car download is not a GLB (Google Drive blocked it?)'; head -c 300 my-game/assets/car/mercedes-source.glb; exit 1; }
           npx --yes @gltf-transform/cli@4.5.1 optimize my-game/assets/car/mercedes-source.glb my-game/assets/car/mercedes-w206.glb \
-            --simplify false \
+            --simplify true \
+            --simplify-ratio 0.5 \
+            --simplify-error 0.003 \
             --texture-compress webp \
             --texture-size 1024 \
             --compress false \

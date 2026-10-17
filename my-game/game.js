@@ -363,6 +363,17 @@ const trackPaths = [
   'assets/track/scene.gltf'
 ];
 
+function showLoadError(err) {
+  const msg = document.getElementById('loading-text');
+  if (msg) msg.textContent = 'Load error: ' + (err && err.message ? err.message : err);
+}
+function onTrackProgress(xhr) {
+  const msg = document.getElementById('loading-text');
+  if (msg && xhr && xhr.lengthComputable && xhr.total > 0) {
+    msg.textContent = 'Loading circuit ' + Math.round(xhr.loaded / xhr.total * 100) + '%';
+  }
+}
+
 function tryLoadTrack(index = 0) {
   if (index >= trackPaths.length) {
     console.error('All track paths failed to load!');
@@ -381,6 +392,9 @@ function tryLoadTrack(index = 0) {
     trackPaths[index],
     (gltf) => {
       console.log('Spa track loaded successfully:', trackPaths[index]);
+      const prepMsg = document.getElementById('loading-text');
+      if (prepMsg) prepMsg.textContent = 'Preparing track...';
+      try {
       const trackModel = gltf.scene;
       
       trackModel.updateMatrixWorld(true);
@@ -468,8 +482,12 @@ function tryLoadTrack(index = 0) {
       const overlay = document.getElementById('loading-overlay');
       if (overlay) overlay.style.opacity = '0';
       setTimeout(() => { if (overlay) overlay.style.display = 'none'; }, 500);
+      } catch (err) {
+        console.error('Track setup failed:', err);
+        showLoadError(err);
+      }
     },
-    undefined,
+    onTrackProgress,
     () => {
       tryLoadTrack(index + 1);
     }
@@ -652,7 +670,12 @@ function findInitialCarSpawn() {
     downRay.set(new THREE.Vector3(c.x, highY, c.z), downDir);
     downRay.far = 80;
     downRayHits.length = 0;
-    downRay.intersectObjects(trackColliders, false, downRayHits);
+    const localColliders = [];
+    for (let k = 0; k < trackColliders.length; k++) {
+      const b = trackColliders[k].userData.worldBox;
+      if (b && c.x >= b.min.x && c.x <= b.max.x && c.z >= b.min.z && c.z <= b.max.z) localColliders.push(trackColliders[k]);
+    }
+    downRay.intersectObjects(localColliders, false, downRayHits);
     for (let j = 0; j < downRayHits.length; j++) {
       const hit = downRayHits[j];
       const wn = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : null;

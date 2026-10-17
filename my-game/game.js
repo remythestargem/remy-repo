@@ -1057,6 +1057,13 @@ function updateHUD(dt) {
   }
 }
 
+// On-screen diagnostics (remove once rendering is confirmed working).
+const debugElem = document.createElement('div');
+debugElem.style.cssText = 'position:fixed;left:8px;bottom:140px;z-index:9999;color:#7CFC00;font:11px monospace;background:rgba(0,0,0,0.6);padding:4px 6px;pointer-events:none;white-space:pre;border-radius:4px;';
+document.body.appendChild(debugElem);
+let glContextLost = false;
+renderer.domElement.addEventListener('webglcontextlost', (e) => { e.preventDefault(); glContextLost = true; });
+
 // Physics Loop
 let lastTime = performance.now();
 let animationFrameId = 0;
@@ -1268,6 +1275,11 @@ function animate(now) {
     if (fpsElem) fpsElem.textContent = curFps + ' FPS';
     if (frameTimeElem) frameTimeElem.textContent = curFrameMs.toFixed(1) + ' ms';
     updateHUD(dt);
+    const dbgInfo = renderer.info;
+    debugElem.textContent =
+      `ctx ${glContextLost || renderer.getContext().isContextLost() ? 'LOST' : 'ok'}  calls ${dbgInfo.render.calls}  tris ${dbgInfo.render.triangles}\n` +
+      `geo ${dbgInfo.memory.geometries}  tex ${dbgInfo.memory.textures}  track ${trackLoaded ? 'yes' : 'no'}  colliders ${trackColliders.length}\n` +
+      `car ${state.car.position.x.toFixed(0)},${state.car.position.y.toFixed(1)},${state.car.position.z.toFixed(0)}  cam ${camera.position.x.toFixed(0)},${camera.position.y.toFixed(1)},${camera.position.z.toFixed(0)}  far ${camera.far.toFixed(0)}`;
   }
 
   renderer.render(scene, camera);

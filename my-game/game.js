@@ -17,6 +17,13 @@ const renderScaleElem = document.getElementById('render-scale-counter');
 // Spa Racing & Pursuit Engine - Three.js
 
 // Game State
+// Starting-grid spawn used by findInitialCarSpawn(). Heading follows the game's
+// convention (forward = -sin(h), -cos(h)); flip by Math.PI if the car starts facing backwards.
+const VEHICLE_CONFIG = {
+  initialPosition: new THREE.Vector3(-322.0, 0.0, -760.0),
+  initialHeading: Math.PI + 0.32
+};
+
 const state = {
   mode: 'car', // 'car' or 'foot'
   car: {
